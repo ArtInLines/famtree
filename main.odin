@@ -1,85 +1,67 @@
-#define AIL_ALL_IMPL
-#define AIL_ALLOC_IMPL
-#define AIL_GUI_IMPL
-#define AIL_SV_IMPL
-#define AIL_HM_IMPL
-#include "ail.h"
-#include "ail_hm.h"
-#include "ail_sv.h"
-#include "ail_gui.h"
-#include "ail_alloc.h"
-#include "raylib.h"
+package main
 
-#if !defined(_DEBUG) || defined(DEBUG)
-#undef AIL_ASSERT
-#define AIL_ASSERT(cond) do { if (0) !!cond; }
-#endif
+import "core:mem"
+import "core:fmt"
+import "core:c"
+import rl "vendor:raylib"
 
-typedef u32 PersonIdx;
-#define NULL_IDX UINT32_MAX
-AIL_HM_INIT(PersonIdx, u8);
-
+PersonIdx :: distinct u32;
+NULL_IDX  : PersonIdx : c.UINT32_MAX
 
 // For displaying
 
 // Bitmask for coordinate that is known
-typedef enum LayerKnowledge {
-	KNOWN_X = 1,    // 0b01
-	KNOWN_Y = 2,    // 0b10
+LayerKnowledge :: enum u8 {
+	KNOWN_X    = 1, // 0b01
+	KNOWN_Y    = 2, // 0b10
 	KNOWN_BOTH = 3, // 0b11
-} LayerKnowledge;
+}
 
-typedef struct MinMax {
-	i16 min;
-	i16 max;
-} MinMax;
-AIL_DA_INIT(MinMax);
+MinMax :: struct {
+	min, max: i16
+}
 
 // The layer that a person is on in the family tree
 // The starting character is always on 0,0
 // Siblings are on the same y with a different x
 // Parents are on a lower y, with x-1 and x+1 respectively (unless it's a single parent of course)
 // `tag` indicates whether one of the coordinates is not yet known
-typedef struct Layer {
-	i16 y;
-	i16 x;
-	PersonIdx i;
-	LayerKnowledge tag;
-} Layer;
-AIL_DA_INIT(Layer);
+Layer :: struct {
+	x, y: i16,
+	i: PersonIdx,
+	tag: LayerKnowledge
+}
 
-typedef struct Display {
-	Vector2 offset;
-	f32 zoom;
-} Display;
+Display :: struct {
+	offset: rl.Vector2,
+	zoom: f32,
+}
 
 
 // For modelling
 
-typedef enum Sex {
+Sex :: enum u8 {
 	SEX_F,  // female
 	SEX_M,  // male
 	SEX_U,  // unknown
-} Sex;
+}
 
-typedef enum RelType {
+RelType :: enum u8 {
 	REL_MARRIED,
 	REL_PARENT,
-} RelType;
+}
 
-typedef struct Rel {
-	RelType type;
-	PersonIdx from;
-	PersonIdx to;
-} Rel;
-AIL_DA_INIT(Rel);
+Rel :: struct {
+	type: RelType,
+	from, to: PersonIdx,
+}
 
-typedef struct Person {
-	bool rm; // Indicates whether the person has been removed or not
-	Sex sex;
-	AIL_Str name;
-	AIL_DA(Rel) rels;
-} Person;
+Person :: struct {
+	rm: bool, // Indicates whether the person has been removed or not
+	sex: Sex,
+	name: string,
+	rels: [dynamic]Rel,
+}
 
 // PersonList is a dynamic array, that guarantuees indexes to stay correct forever
 // It does so by storing a linked-list of previously removed indexes
@@ -88,22 +70,21 @@ typedef struct Person {
 // The `rm` field of the Person indicates whetehr the person has been removed already
 // The `name` field is re-interpreted as a PersonIdx and stores the index to the next free index
 // or NULL_IDX at the end of the linked-list
-typedef struct PersonList {
-	Person *data;
-	u32 len;
-	u32 cap;
-	PersonIdx free_head; // Free-list via indexes instead of pointers
-	AIL_Allocator *allocator;
-} PersonList;
+PersonList :: struct {
+	data: ^Person,
+	len: u32,
+	cap: u32,
+	free_head: PersonIdx, // Free-list via indexes instead of pointers
+	allocator: mem.Allocator,
+}
 // Global PersonList -> all Persons are allocated and managed in this list
-static PersonList persons;
+persons: PersonList;
 
-PersonIdx person_add(Person p)
-{
+person_add :: proc(p: Person) -> PersonIdx {
 	if (persons.free_head != NULL_IDX) {
-		AIL_ASSERT(persons.data[persons.free_head].rm);
-		PersonIdx idx  = persons.free_head;
-		PersonIdx next = *(PersonIdx *)&(persons.data[idx].name);
+		assert(persons.data[persons.free_head].rm);
+		idx  := persons.free_head
+		next := transmute(PersonIdx)(persons.data[idx].name)
 		persons.data[idx] = p;
 		persons.free_head = next;
 		return idx;
@@ -113,17 +94,15 @@ PersonIdx person_add(Person p)
 	}
 }
 
-void person_rm(PersonIdx idx)
-{
-	AIL_ASSERT(!persons.data[idx].rm);
-	if (AIL_UNLIKELY(persons.data[idx].rm)) return;
+person_rm :: proc(idx: PersonIdx) {
+	assert(!persons.data[idx].rm);
+	if persons.data[idx].rm do return
 	persons.data[idx].rm = true;
-	*(PersonIdx *)&(persons.data[idx].name) = persons.free_head;
+	^(^PersonIdx)&(persons.data[idx].name) = persons.free_head;
 	persons.free_head = idx;
 }
 
-PersonList person_list_init(u32 cap, AIL_Allocator *allocator)
-{
+person_list_init :: proc(cap: u32, allocator: mem.Allocator) -> PersonList {
 	return (PersonList) {
 		.data = allocator->alloc(allocator->data, sizeof(Person) * cap),
 		.len  = 0,
@@ -133,63 +112,61 @@ PersonList person_list_init(u32 cap, AIL_Allocator *allocator)
 	};
 }
 
-Rel rel_add(PersonIdx from, PersonIdx to, RelType type)
-{
-	Rel rel = { .from = from, .to = to, .type = type };
-	ail_da_push(&persons.data[from].rels, rel);
-	ail_da_push(&persons.data[to].rels,   rel);
-	return rel;
+rel_add :: proc(from, to: PersonIdx, type: RelType) -> Rel {
+	rel := Rel{ from = from, to = to, type = type }
+	append(&persons.data[from].rels, rel)
+	append(&persons.data[to].rels,   rel)
+	return rel
 }
 
-#define PERSON_WIDTH  150
-#define PERSON_HEIGHT 100
-#define PERSON_PAD    15
-AIL_Gui_Style style_default;
-AIL_HM(PersonIdx, u8) drawn_persons;
-AIL_Allocator draw_arena;
+PERSON_WIDTH  :: 150
+PERSON_HEIGHT :: 100
+PERSON_PAD    :: 15
+drawn_persons: map[PersonIdx]u8
+draw_arena: mem.Allocator
 
 
-void clear_drawn_persons(void)
-{
+clear_drawn_persons :: proc(void) {
 	memset(drawn_persons.data, 0, drawn_persons.cap);
 	drawn_persons.len = 0;
 	drawn_persons.once_filled = 0;
 }
 
 // @Study: Is this a good hash for this specific context?
-u32 idx_hash(PersonIdx idx)
-{
-	return idx;
+idx_hash :: proc(idx: PersonIdx) -> u32 {
+	return idx
 }
 
-bool idx_eq(PersonIdx a, PersonIdx b)
-{
-	return a == b;
+idx_eq :: proc(a, b: PersonIdx) -> bool {
+	return a == b
 }
 
-void draw_person(Layer layer, Display display)
-{
-	Person p = persons.data[layer.i];
-	AIL_ASSERT(!p.rm);
-	Rectangle rect = { // @TODO (and remove this calc from draw_tree)a
-		.x = layer.x
-	};
-	printf("Drawing Person '%s' at (%f, %f)\n", p.name.str, x, y);
-	AIL_Gui_Label label = {
-		.bounds       = (Rectangle) { x + display.offset.x, y + display.offset.y, w, h },
-		.text         = ail_da_from_parts(char, p.name.str, p.name.len + 1, p.name.len + 1, NULL),
-		.defaultStyle = style_default,
-		.hovered      = style_default,
-	};
-	ail_gui_drawLabel(label);
+draw_person :: proc(layer: Layer, display: Display) {
+	p: Person = persons.data[layer.i];
+	assert(!p.rm);
+	rect := rl.Rectangle{ // @TODO (and remove this calc from draw_tree)
+		x = layer.x,
+		y = 0,
+		width = 0,
+		height = 0,
+	}
+	fmt.printf("Drawing Person '%s' at (%f, %f)\n", p.name.str, x, y);
+	bounds := rl.Rectangle{
+		x = x + display.offset.x,
+		y = y + display.offset.y,
+		width = w,
+		height = h,
+	}
+	// @TODO: Get rid of hardcoded values here
+	rl.DrawRectangle(bounds.x, bounds.y, bounds.w, bounds.h, rl.GRAY)
+	rl.DrawText(p.name, bounds.x, bounds.y, 20, rl.WHITE)
 }
 
-void add_rels_from_layer(Layer l, AIL_DA(Layer) *layers)
-{
-	AIL_DA(Rel) rels = persons.data[l.i].rels;
-	for (u32 j = 0; j < rels.len; j++) {
-		Layer layer;
-		Rel r = rels.data[j];
+add_rels_from_layer :: proc(l: Layer, layers: ^[dynamic]Layer) {
+	rels := persons.data[l.i].rels;
+	for j: u32 = 0; j < rels.len; j += 1 {
+		layer: Layer;
+		r := rels.data[j];
 		switch (r.type) {
 			case REL_PARENT: {
 				if (l.i == r.from) {
@@ -217,22 +194,22 @@ void add_rels_from_layer(Layer l, AIL_DA(Layer) *layers)
 				};
 			} break;
 		}
-		ail_da_push(layers, layer);
+		append(layers, layer);
 	}
 }
 
-void draw_tree(PersonIdx start, u32 degrees, Display display)
-{
+draw_tree :: proc(start: PersonIdx, degrees: u32, display: Display) {
 	clear_drawn_persons();
-	Person p = persons.data[start];
-	AIL_ASSERT(!p.rm);
+	p := persons.data[start];
+	assert(!p.rm);
 
-	ail_hm_put(&drawn_persons, start, 1);
+
+	drawn_persons[start] = 1
 	draw_person(0, 0, PERSON_WIDTH, PERSON_HEIGHT, p, display);
 
 	// 0 is among the positive y layers
-	MinMax *taken_y_range_per_pos_y = draw_arena.zero_alloc(draw_arena.data, degrees + 1, sizeof(MinMax));
-	MinMax *taken_y_range_per_neg_y = draw_arena.zero_alloc(draw_arena.data, degrees, sizeof(MinMax));
+	taken_y_range_per_pos_y := draw_arena.zero_alloc(draw_arena.data, degrees + 1, sizeof(MinMax));
+	taken_y_range_per_neg_y := draw_arena.zero_alloc(draw_arena.data, degrees, sizeof(MinMax));
 	taken_y_range_per_pos_y[0] = (MinMax) { -1, 1 };
 
 	AIL_DA(Layer) cur_stack  = ail_da_new_with_alloc(Layer, 32, &draw_arena);
@@ -242,7 +219,7 @@ void draw_tree(PersonIdx start, u32 degrees, Display display)
 	for (u32 i = 0; i < 3 + degrees; i++) {
 		while (cur_stack.len) {
 			Layer next = cur_stack.data[cur_stack.len--];
-			AIL_ASSERT(!persons.data[next.i].rm);
+			assert(!persons.data[next.i].rm);
 			u32 drawn_persons_idx; AIL_UNUSED(drawn_persons_idx);
 			bool found;
 			ail_hm_get_idx(&drawn_persons, next.i, drawn_persons_idx, found);
