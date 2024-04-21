@@ -22,7 +22,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
 	pp := opts.zoom*DEFAULT_PERSON_PAD
 	for row, i in layout.rows {
 		y := f32(i32(i) - layout.coord_offset.y)*(ph + pp)
-		for el in row {
+		for el in row.data {
 			x := f32(el.x - layout.coord_offset.x)*(pw + pp)
 			DrawRectangleV({ x, y }, { pw, ph }, GRAY)
 			DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + pp), i32(y + pp), i32(ph - 2*pp), WHITE)
@@ -41,14 +41,15 @@ main :: proc() {
 	font := GetFontDefault()
 
 	pm := person_manager_init()
-	val    := person_add(&pm, Person{ name = "Val",    birth = { year = 2003 }})
 	samuel := person_add(&pm, Person{ name = "Samuel", birth = { year = 2000 }})
+	val    := person_add(&pm, Person{ name = "Val",    birth = { year = 2003 }})
 	annika := person_add(&pm, Person{ name = "Annika", birth = { year = 2007 }})
 	rel_add(&pm, val,    Rel{ person = samuel, type = .Friend })
 	rel_add(&pm, val,    Rel{ person = annika, type = .Friend })
 	rel_add(&pm, samuel, Rel{ person = annika, type = .Friend })
 
 	layout := layout_tree(pm, val, LayoutOpts{ max_distance = 5, rels_to_show = {.Friend} })
+	fmt.println(layout)
 
 	for !WindowShouldClose() {
 		if IsWindowResized() {
@@ -65,6 +66,9 @@ main :: proc() {
 			ClearBackground(BLACK)
 			draw_layout(pm, layout, display_opts)
 			DrawFPS(10, 10)
+
 		EndDrawing()
 	}
+
+	CloseWindow()
 }
