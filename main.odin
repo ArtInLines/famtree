@@ -23,7 +23,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
 	for row, i in layout.rows {
 		y := f32(i32(i) - layout.coord_offset.y)*(ph + pp)
 		for el in row.data {
-			x := f32(el.x - layout.coord_offset.x)*(pw + pp)
+			x := (el.x.(f32) - f32(layout.coord_offset.x))*(pw + pp)
 			DrawRectangleV({ x, y }, { pw, ph }, GRAY)
 			DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + pp), i32(y + pp), i32(ph - 2*pp), WHITE)
 		}
