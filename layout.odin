@@ -166,20 +166,23 @@ patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout:
 		if row.max_x != UNKNOWN_X_COORD do max_x = max(max_x, row.max_x)
 	}
 
-	coord_map_idx_offset := min_x
-	coord_map := make([]i32, max_x - min_x, allocator=allocator)
+	coord_map_idx_offset := min_x - 1 // -1, because we need to store the maximum amount of persons before the first locked person too
+	required_space_after_coord := make([]f32, max_x - min_x + 1, allocator=allocator)
 	for row in layout.rows {
 		count      := 0
 		last_coord := UNKNOWN_X_COORD
-		for el in row.data {
+		for el, i in row.data {
 			if el.x.(i32) == UNKNOWN_X_COORD {
 				count += 1
 			} else {
 				if last_coord == UNKNOWN_X_COORD do last_coord = min_x
 				unfilled_coords_count  := el.x.(i32) - last_coord
-				persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : i32(math.ceil(f32(count) / f32(unfilled_coords_count)))
+				persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
 				for i in coord_map_idx_offset + last_coord ..< coord_map_idx_offset + el.x.(i32) {
-					coord_map[i] = max(coord_map[i], persons_per_prev_coord)
+					required_space_after_coord[i] = max(required_space_after_coord[i], persons_per_prev_coord)
+				}
+				for j in 0..=count {
+					row.data[j+(i-count)].x = f32(last_coord) + (f32(j) / f32(count))*f32(unfilled_coords_count)
 				}
 				last_coord = el.x.(i32)
 				count = 0
@@ -187,16 +190,15 @@ patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout:
 		}
 
 		unfilled_coords_count  := max_x - row.max_x
-		persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : i32(math.ceil(f32(count) / f32(unfilled_coords_count)))
+		persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
 		for i in coord_map_idx_offset + row.max_x ..< coord_map_idx_offset + max_x {
-			coord_map[i] = max(coord_map[i], persons_per_prev_coord)
+			required_space_after_coord[i] = max(required_space_after_coord[i], persons_per_prev_coord)
 		}
 	}
 
 	for &row in layout.rows {
-
 		for &el in row.data {
-
+			el.x = math.floor(el.x.(f32)) + (el.x.(f32) - math.floor(el.x.(f32))) * required_space_after_coord[int(el.x.(f32))]
 		}
 	}
 }
