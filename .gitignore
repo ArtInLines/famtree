@@ -1,3 +1,5 @@
 *.exe
 *.a
 *.o
+*.pdb
+*.raddbg
