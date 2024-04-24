@@ -40,15 +40,18 @@ main :: proc() {
 
     font := GetFontDefault()
 
-    pm := person_manager_init()
-    samuel := person_add(&pm, Person{ name = "Samuel", birth = { year = 2000 }})
-    val    := person_add(&pm, Person{ name = "Val",    birth = { year = 2003 }})
-    annika := person_add(&pm, Person{ name = "Annika", birth = { year = 2007 }})
-    rel_add(&pm, val,    Rel{ person = samuel, type = .Friend })
-    rel_add(&pm, val,    Rel{ person = annika, type = .Friend })
-    rel_add(&pm, samuel, Rel{ person = annika, type = .Friend })
+    pm        := person_manager_init()
+    rene      := person_add(&pm, Person{ name = "Rene",      birth = { year = 1974 }})
+    katharina := person_add(&pm, Person{ name = "Katharina", birth = { year = 1975 }})
+    samuel    := person_add(&pm, Person{ name = "Samuel",    birth = { year = 2000 }})
+    val       := person_add(&pm, Person{ name = "Val",       birth = { year = 2003 }})
+    annika    := person_add(&pm, Person{ name = "Annika",    birth = { year = 2007 }})
+    rel_add(pm, rene, { person = katharina, type = RelType.Married })
+    child_add(pm, samuel, rene, katharina)
+    child_add(pm, val,    rene, katharina)
+    child_add(pm, annika, rene, katharina)
 
-    layout := layout_tree(pm, val, LayoutOpts{ max_distance = 5, rels_to_show = {.Friend} })
+    layout := layout_tree(pm, rene, LayoutOpts{ max_distance = 5, rels_to_show = {.Friend} })
     fmt.println(layout)
 
     for !WindowShouldClose() {

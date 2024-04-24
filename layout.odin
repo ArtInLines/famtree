@@ -132,27 +132,32 @@ add_related_to_layout :: proc(pm: PersonManager, start: PersonHandle, row: ^Layo
     }
 }
 
+should_display_child :: proc(pm: PersonManager, parent, child: PersonHandle, row: LayoutRow, opts: LayoutOpts) -> bool {
+    return ((LayoutFlags.Actual_Parents in opts.flags && is_actual_parent(pm, child, parent)) || is_official_parent(pm, child, parent)) &&
+           (LayoutFlags.Dead_Persons    in opts.flags || person_get(pm, child).death == {})      && child not_in row.persons_cache
+}
+
 add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts) {
     // @Todo: Patch potentially duplicate x coordinates (by moving ancestors around) (return value by which parent was moved to the right, so that it can be offset again (either in patch_coordinates or when rendering))
     count := i32(0)
     for child in person_get_rels(pm, parent.ph).children {
-        if ((LayoutFlags.Actual_Parents in opts.flags && is_actual_parent(pm, child, parent.ph)) || is_official_parent(pm, child, parent.ph)) &&
-           (LayoutFlags.Dead_Persons    in opts.flags || person_get(pm, child).death == {})      && child not_in layout.rows[children_row].persons_cache {
-            append_person_to_row({ ph = child, x = parent.x.(i32) + count }, &layout.rows[children_row])
-            count += 1
-        }
+        if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) do count += 1
     }
     mid       := count/2
     row_len   := i32(len(layout.rows[children_row].data))
     next_opts := opts
     next_opts.max_distance -= 1
-    for i in 1..=count {
-        child := &layout.rows[children_row].data[row_len - i]
-        child.x = child.x.(i32) - mid
-        if opts.max_distance > 0 {
-            child_col := int(row_len - i)
-            add_descendants_to_layout(pm, child^, children_row + 1, layout, next_opts)
-            add_related_to_layout(pm, child.ph, &layout.rows[children_row], &child_col, next_opts)
+    i: i32 = 0
+    for child in person_get_rels(pm, parent.ph).children {
+        if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) {
+            child := LayoutPersonEl { ph = child, x = parent.x.(i32) + i - mid }
+            append_person_to_row(child, &layout.rows[children_row])
+            if opts.max_distance > 0 {
+                child_col := int(row_len - i)
+                add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts)
+                add_related_to_layout(pm, child.ph, &layout.rows[children_row], &child_col, next_opts)
+            }
+            i += 1
         }
     }
 }
@@ -186,12 +191,13 @@ patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout:
                 cur_coord := el.x.(i32)
                 unfilled_coords_count  := el.x.(i32) - last_coord
                 persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
-                for i in coord_map_idx_offset + last_coord ..< coord_map_idx_offset + el.x.(i32) {
+                for i in coord_map_idx_offset - last_coord ..< coord_map_idx_offset + el.x.(i32) {
                     coord_map[i] = max(coord_map[i], persons_per_prev_coord)
                 }
-                for j in 0..=count {
-                    row.data[j+(i-count)].x = f32(f32(last_coord) + (f32(j) / f32(count))*f32(unfilled_coords_count))
+                for j in 0..<count {
+                    row.data[j+(i-count)].x = f32(last_coord) + (f32(j) / f32(count))*f32(unfilled_coords_count)
                 }
+                row.data[i].x = f32(row.data[i].x.(i32))
                 last_coord = el.x.(i32) // @Note: works even though all x coordinates are transformed into floats, bc `el` is a copy
                 last_idx   = i
                 count      = 0
@@ -211,10 +217,16 @@ patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout:
         }
     }
 
+    // for row, i in layout.rows {
+    //     fmt.println(i)
+    //     for el, j in row.data {
+    //         fmt.println(j, el.x)
+    //     }
+    // }
+
     for &row in layout.rows {
         for &el, i in row.data {
-            fmt.println(i, el.x)
-            el.x = math.floor(el.x.(f32)) + (el.x.(f32) - math.floor(el.x.(f32))) * coord_map[i32(el.x.(f32)) + coord_map_idx_offset]
+            el.x = math.floor(el.x.(f32)) + (el.x.(f32) - math.floor(el.x.(f32))) * coord_map[i32(el.x.(f32)) - min_x + 1]
         }
     }
 }
@@ -240,6 +252,9 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
     add_ancestors_to_layout()
     add_descendants_to_layout(pm, start_el, int(center_row + 1), &layout, opts)
     add_related_to_layout(pm, start_person, &layout.rows[center_row], &start_col, opts)
+
+    fmt.println(layout.rows[center_row + 1])
+
     patch_coordinates(pm, start_person, &layout, allocator)
 
     return layout, err

@@ -337,32 +337,47 @@ person_rm :: proc(pm: ^PersonManager, ph: PersonHandle) {
     // Remove each relation to this person and free memory
     for rhs in rels_of_ph.from {
         for rh in rhs {
-            rel_rm(pm, rh)
+            rel_rm(pm^, rh)
         }
         delete(rhs)
     }
 }
 
-rel_add :: proc(pm: ^PersonManager, from: PersonHandle, rel: Rel) -> (val: RelHandle, err: runtime.Allocator_Error) #optional_allocator_error {
+rel_add :: proc(pm: PersonManager, from: PersonHandle, rel: Rel) -> (val: RelHandle, err: runtime.Allocator_Error) #optional_allocator_error {
     r := rel
     r.id = pm.rels[from].next_id
     pm.rels[from].next_id += 1
     val   = handle_of_rel(r)
     err   = rel_insert_sorted(&pm.rels[from].rels[rel.type], r)
-    err2 := from_insert_sorted(pm^, &pm.rels[rel.person].from[rel.type], val)
+    err2 := from_insert_sorted(pm, &pm.rels[rel.person].from[rel.type], val)
     if err == nil do err = err2
     return val, err
 }
 
-rel_rm :: proc(pm: ^PersonManager, rh: RelHandle) {
+rel_rm :: proc(pm: PersonManager, rh: RelHandle) {
     for _, type in pm.rels[rh.ph].rels {
         for _, i in pm.rels[rh.ph].rels[type] {
             rel := pm.rels[rh.ph].rels[type][i]
             if rel.id == rh.id {
-                rm_rel_ref_in_from_list(pm^, rel)
+                rm_rel_ref_in_from_list(pm, rel)
                 ordered_remove(&pm.rels[rh.ph].rels[type], i)
                 return
             }
         }
     }
 }
+
+child_add :: proc(pm: PersonManager, child, officialParent1: PersonHandle, officialParent2: PersonHandle = 0, actualParent1: PersonHandle = 0, actualParent2: PersonHandle = 0) {
+    person_get_rels_ptr(pm, child).official_parents = {officialParent1, officialParent2}
+    person_get_rels_ptr(pm, child).actual_parents   = {actualParent1,   actualParent2}
+    parents: []PersonHandle = {officialParent1, officialParent2, actualParent1, actualParent2}
+    for p in parents {
+        if p != 0 {
+            children := &person_get_rels_ptr(pm, p).children
+            append(children, child)
+            sort_children(pm, children)
+        }
+    }
+}
+
+// @TODO: child_rm
