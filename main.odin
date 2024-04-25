@@ -21,9 +21,9 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
     ph := opts.zoom*DEFAULT_PERSON_HEIGHT
     pp := opts.zoom*DEFAULT_PERSON_PAD
     for row, i in layout.rows {
-        y := f32(i32(i) - layout.coord_offset.y)*(ph + pp)
+        y := f32(i32(i) - layout.coord_offset.y)*(ph + pp) + opts.offset.y
         for el in row.data {
-            x := (el.x.(f32) - f32(layout.coord_offset.x))*(pw + pp)
+            x := (el.x.(f32) - f32(layout.coord_offset.x))*(pw + pp) + opts.offset.x
             DrawRectangleV({ x, y }, { pw, ph }, GRAY)
             DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + pp), i32(y + pp), i32(ph - 2*pp), WHITE)
         }
@@ -52,16 +52,21 @@ main :: proc() {
     child_add(pm, annika, rene, katharina)
 
     layout := layout_tree(pm, rene, LayoutOpts{ max_distance = 5, rels_to_show = {.Friend} })
-    fmt.println(layout)
+
+    offset: [2]f32  = { 0, 0 }
 
     for !WindowShouldClose() {
         if IsWindowResized() {
             win_width  = GetScreenWidth()
             win_height = GetScreenHeight()
         }
+
+        if IsMouseButtonDown(.LEFT) {
+            offset += GetMouseDelta()
+        }
         display_opts := DisplayOpts {
             screen = { f32(win_width), f32(win_height) },
-            offset = { 0, 0 },
+            offset = offset,
             zoom   = 1,
         }
 
@@ -69,7 +74,6 @@ main :: proc() {
             ClearBackground(BLACK)
             draw_layout(pm, layout, display_opts)
             DrawFPS(10, 10)
-
         EndDrawing()
     }
 
