@@ -18,16 +18,28 @@ DisplayOpts :: struct {
 
 draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
     using rl
-    pw := opts.zoom*DEFAULT_PERSON_WIDTH
-    ph := opts.zoom*DEFAULT_PERSON_HEIGHT
-    pn := opts.zoom*DEFAULT_PERSON_MARGIN
-    pp := opts.zoom*DEFAULT_PERSON_PAD
-    for row, i in layout.rows {
-        y := f32(i32(i) - layout.coord_offset.y)*(ph + pn) + opts.offset.y
+    width   := opts.zoom*DEFAULT_PERSON_WIDTH
+    height  := opts.zoom*DEFAULT_PERSON_HEIGHT
+    margin  := opts.zoom*DEFAULT_PERSON_MARGIN
+    padding := opts.zoom*DEFAULT_PERSON_PAD
+    total_height := f32(len(layout.rows))*(height + margin) - margin
+
+    min_x: f32 =  1000000
+    max_x: f32 = -1000000
+    for row in layout.rows {
         for el in row.data {
-            x := (el.x.(f32) - f32(layout.coord_offset.x))*(pw + pn) + opts.offset.x
-            DrawRectangleV({ x, y }, { pw, ph }, GRAY)
-            DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + pp), i32(y + pp), i32(ph - 2*pp), WHITE)
+            if el.x.(f32) < min_x do min_x = el.x.(f32)
+            if el.x.(f32) > max_x do max_x = el.x.(f32)
+        }
+    }
+    total_width := (max_x - min_x)*(width + margin) - margin
+
+    for row, i in layout.rows {
+        y := f32(i32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y + (opts.screen.y - total_height)/2
+        for el in row.data {
+            x := (el.x.(f32) - f32(layout.coord_offset.x))*(width + margin) + opts.offset.x + (opts.screen.x - total_width)/2
+            DrawRectangleV({ x, y }, { width, height }, GRAY)
+            DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + padding), i32(y + padding), i32(height - 2*padding), WHITE)
         }
     }
 }
@@ -81,6 +93,8 @@ main :: proc() {
         if IsMouseButtonDown(.LEFT) {
             display_opts.offset += GetMouseDelta()
         }
+
+        display_opts.zoom += GetMouseWheelMove()*0.1
 
         BeginDrawing()
             ClearBackground(BLACK)
