@@ -9,6 +9,7 @@ DEFAULT_PERSON_WIDTH  :: 150
 DEFAULT_PERSON_HEIGHT :: 30
 DEFAULT_PERSON_MARGIN :: 20
 DEFAULT_PERSON_PAD    :: 5
+MOUSE_WHEEL_ZOOM_FACTOR :: 0.2
 
 DisplayOpts :: struct {
     screen: [2]f32,
@@ -22,22 +23,11 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
     height  := opts.zoom*DEFAULT_PERSON_HEIGHT
     margin  := opts.zoom*DEFAULT_PERSON_MARGIN
     padding := opts.zoom*DEFAULT_PERSON_PAD
-    total_height := f32(len(layout.rows))*(height + margin) - margin
-
-    min_x: f32 =  1000000
-    max_x: f32 = -1000000
-    for row in layout.rows {
-        for el in row.data {
-            if el.x.(f32) < min_x do min_x = el.x.(f32)
-            if el.x.(f32) > max_x do max_x = el.x.(f32)
-        }
-    }
-    total_width := (max_x - min_x)*(width + margin) - margin
-
     for row, i in layout.rows {
-        y := f32(i32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y + (opts.screen.y - total_height)/2
+        y := (f32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y
         for el in row.data {
-            x := (el.x.(f32) - f32(layout.coord_offset.x))*(width + margin) + opts.offset.x + (opts.screen.x - total_width)/2
+            // fmt.println("Drawing:", person_get(pm, el.ph))
+            x := (el.x.(f32) - f32(layout.coord_offset.x))*(width + margin) + opts.offset.x
             DrawRectangleV({ x, y }, { width, height }, GRAY)
             DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + padding), i32(y + padding), i32(height - 2*padding), WHITE)
         }
@@ -60,19 +50,37 @@ main :: proc() {
 
     font := GetFontDefault()
 
-    pm        := person_manager_init()
-    rene      := person_add(&pm, Person{ name = "Rene",      birth = { year = 1974 }})
-    katharina := person_add(&pm, Person{ name = "Katharina", birth = { year = 1975 }})
-    samuel    := person_add(&pm, Person{ name = "Samuel",    birth = { year = 2000 }})
-    val       := person_add(&pm, Person{ name = "Val",       birth = { year = 2003 }})
-    annika    := person_add(&pm, Person{ name = "Annika",    birth = { year = 2007 }})
-    rel_add(pm, rene, { person = katharina, type = RelType.Married })
-    child_add(pm, samuel, rene, katharina)
-    child_add(pm, val,    rene, katharina)
-    child_add(pm, annika, rene, katharina)
+    pm          := person_manager_init()
+    Raymun      := person_add(&pm, Person{ name = "Raymun",  birth = { year = 216 }})
+    Clarice     := person_add(&pm, Person{ name = "Clarice", birth = { year = 250 }})
+    Bethany     := person_add(&pm, Person{ name = "Bethany", birth = { year = 219 }})
+    Lanna       := person_add(&pm, Person{ name = "Lanna",   birth = { year = 270 }})
+    Reynard     := person_add(&pm, Person{ name = "Reynard", birth = { year = 272 }})
+    Falia       := person_add(&pm, Person{ name = "Falia",   birth = { year = 275 }})
+    Aleyne      := person_add(&pm, Person{ name = "Aleyne",  birth = { year = 274 }})
+    Harlen      := person_add(&pm, Person{ name = "Harlen",  birth = { year = 270 }})
+    Desmera     := person_add(&pm, Person{ name = "Desmera", birth = { year = 278 }})
+    Erren       := person_add(&pm, Person{ name = "Erren",   birth = { year = 276 }})
+    SonOfAleyne := person_add(&pm, Person{ name = "SonOfAleyne",        birth = { year = 291 }, death = { year = 292 }})
+    Bethanys1   := person_add(&pm, Person{ name = "Bethanys1",        birth = { year = 242 }, death = { year = 243 }})
+    Bethanys2   := person_add(&pm, Person{ name = "Bethanys2",        birth = { year = 248 }, death = { year = 249 }})
+    rel_add(pm, Raymun, { person = Clarice, type = RelType.Married, end = { year = 276 } })
+    rel_add(pm, Raymun, { person = Bethany, type = RelType.Married, end = { year = 263 } })
+    rel_add(pm, Raymun, { person = Lanna,   type = RelType.Married })
+    rel_add(pm, Aleyne, { person = Falia,   type = RelType.Affair })
+    rel_add(pm, Aleyne, { person = Harlen,  type = RelType.Married })
+    rel_add(pm, Erren,  { person = Desmera, type = RelType.Married })
+    child_add(pm, Bethanys1,   Raymun, Bethany)
+    child_add(pm, Bethanys2,   Raymun, Bethany)
+    child_add(pm, Reynard,     Raymun, Clarice)
+    child_add(pm, Aleyne,      Raymun, Clarice)
+    child_add(pm, Erren,       Raymun, Clarice)
+    child_add(pm, SonOfAleyne, Aleyne, Harlen)
 
-    layout_opts := LayoutOpts{ max_distance = 5, rels_to_show = {.Friend, .Married, .Affair} }
-    layout := layout_tree(pm, rene, layout_opts)
+
+    layout_opts := LayoutOpts{ max_distance = 5, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
+    layout := layout_tree(pm, Raymun, layout_opts)
+    fmt.println(layout)
 
     display_opts := DisplayOpts {
         screen = { f32(win_width), f32(win_height) },
@@ -90,11 +98,12 @@ main :: proc() {
             display_opts.screen = new_screen
         }
 
-        if IsMouseButtonDown(.LEFT) {
-            display_opts.offset += GetMouseDelta()
-        }
 
-        display_opts.zoom += GetMouseWheelMove()*0.1
+        display_opts.offset += f32(int(IsMouseButtonDown(.LEFT))) * GetMouseDelta()
+
+        zoom_delta := GetMouseWheelMove()*MOUSE_WHEEL_ZOOM_FACTOR
+        display_opts.zoom     += zoom_delta
+        // display_opts.offset.x += zoom_delta*(GetMousePosition().x - display_opts.screen.x)
 
         BeginDrawing()
             ClearBackground(BLACK)

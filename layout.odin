@@ -26,7 +26,7 @@ LayoutXCoord :: union {i32, f32}
 LayoutPersonEl :: struct {
     ph: PersonHandle,
     x:  LayoutXCoord,
-    additional_x_offset: i32,
+    // additional_x_offset: i32,
 
 }
 
@@ -38,7 +38,7 @@ LayoutRow :: struct {
 
 Layout :: struct {
     rows: []LayoutRow,
-    coord_offset: [2]i32,
+    coord_offset: [2]f32,
 }
 
 index_of_person :: proc(arr: []LayoutPersonEl, ph: PersonHandle) -> int {
@@ -88,6 +88,7 @@ update_row_min_max_xs :: proc(row: ^LayoutRow, x: i32) {
 
 @(private="file")
 inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int) {
+    assert(col >= 0)
     inject_at(&row.data, col, person)
     row.persons_cache[person.ph] = true
     update_row_min_max_xs(row, person.x.(i32))
@@ -102,6 +103,7 @@ append_person_to_row :: proc(person: LayoutPersonEl, row: ^LayoutRow) {
 
 add_related_to_layout :: proc(pm: PersonManager, start: PersonHandle, row: ^LayoutRow, start_col: ^int, opts: LayoutOpts) {
     assert(start != {})
+    assert(start_col^ >= 0)
     start_birth      := person_get(pm, start).birth
     rels_of_start_p  := person_get_rels(pm, start)
     #reverse for rel_type in opts.rels_to_show {
@@ -139,21 +141,22 @@ should_display_child :: proc(pm: PersonManager, parent, child: PersonHandle, row
 
 add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts) {
     // @Todo: Patch potentially duplicate x coordinates (by moving ancestors around) (return value by which parent was moved to the right, so that it can be offset again (either in patch_coordinates or when rendering))
+    if opts.max_distance == 0 do return
     count := i32(0)
     for child in person_get_rels(pm, parent.ph).children {
         if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) do count += 1
     }
     mid       := count/2
-    row_len   := i32(len(layout.rows[children_row].data))
     next_opts := opts
     next_opts.max_distance -= 1
     i: i32 = 0
     for child in person_get_rels(pm, parent.ph).children {
         if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) {
             child := LayoutPersonEl { ph = child, x = parent.x.(i32) + i - mid }
+            fmt.println("child:", child, ", ", person_get(pm, child.ph))
             append_person_to_row(child, &layout.rows[children_row])
             if opts.max_distance > 0 {
-                child_col := int(row_len - i)
+                child_col := len(layout.rows[children_row].data) - int(i)
                 add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts)
                 add_related_to_layout(pm, child.ph, &layout.rows[children_row], &child_col, next_opts)
             }
@@ -166,7 +169,7 @@ add_ancestors_to_layout :: proc() {
 
 }
 
-patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout: ^Layout, allocator := context.allocator) {
+patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout: ^Layout, allocator := context.allocator) -> (start_person_offset: f32) {
     min_x: i32 = 0
     max_x: i32 = 0
     for row in layout.rows {
@@ -177,17 +180,21 @@ patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout:
     // @Note: coord_map stores the amount of persons that need to be fit in between any two coordinates
     // at index 0 are the amount of persons that appear before any person with a locked x coordinate
     // at the last index are the amount of persons that appear after any person with a locked x coordinate
-    coord_map_idx_offset := min_x + 1
+    coord_map_idx_offset := abs(min_x) - 1
     coord_map := make([]f32, max_x - min_x + 3, allocator=allocator)
     for row in layout.rows {
         count      := 0
         last_idx   := -1
         last_coord := UNKNOWN_X_COORD
+        last_patched_coord: f32
         for el, i in row.data {
             if el.x.(i32) == UNKNOWN_X_COORD {
                 count += 1
             } else {
-                if last_coord == UNKNOWN_X_COORD do last_coord = min_x - 1
+                if last_coord == UNKNOWN_X_COORD {
+                    last_coord = min_x - 1
+                    last_patched_coord = f32(last_coord)
+                }
                 cur_coord := el.x.(i32)
                 unfilled_coords_count  := el.x.(i32) - last_coord
                 persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
@@ -195,40 +202,37 @@ patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout:
                     coord_map[i] = max(coord_map[i], persons_per_prev_coord)
                 }
                 for j in 0..<count {
-                    row.data[j+(i-count)].x = f32(last_coord) + (f32(j) / f32(count))*f32(unfilled_coords_count)
+                    row.data[j+(i-count)].x = last_patched_coord + 1
+                    last_patched_coord      = row.data[j+(i-count)].x.(f32)
                 }
-                row.data[i].x = f32(row.data[i].x.(i32))
+                row.data[i].x = max(last_patched_coord, f32(row.data[i].x.(i32)))
+                last_patched_coord = row.data[i].x.(f32)
+                if el.ph == start_person do start_person_offset = last_patched_coord
                 last_coord = el.x.(i32) // @Note: works even though all x coordinates are transformed into floats, bc `el` is a copy
                 last_idx   = i
                 count      = 0
             }
         }
 
+        // fmt.println(row)
         assert((row.max_x == UNKNOWN_X_COORD) == (len(row.data) == 0))
         if row.max_x != UNKNOWN_X_COORD {
             unfilled_coords_count  := max_x + 1 - row.max_x
+            // fmt.println("unfilled_coords_count: ", unfilled_coords_count)
             persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
+            // fmt.println("persons_per_prev_coord: ", persons_per_prev_coord)
+            // fmt.println("last_patched_coord: ", last_patched_coord)
+            // fmt.println("last_coord: ", last_coord)
             for i in coord_map_idx_offset + row.max_x ..< coord_map_idx_offset + max_x {
                 coord_map[i] = max(coord_map[i], persons_per_prev_coord)
             }
             for j in 1..=count {
-                row.data[j+last_idx].x = f32(f32(last_coord) + (f32(j) / f32(count))*f32(unfilled_coords_count))
+                row.data[j+last_idx].x = last_patched_coord + 1
+                last_patched_coord     = row.data[j+last_idx].x.(f32)
             }
         }
     }
-
-    // for row, i in layout.rows {
-    //     fmt.println(i)
-    //     for el, j in row.data {
-    //         fmt.println(j, el.x)
-    //     }
-    // }
-
-    for &row in layout.rows {
-        for &el, i in row.data {
-            el.x = math.floor(el.x.(f32)) + (el.x.(f32) - math.floor(el.x.(f32))) * coord_map[i32(el.x.(f32)) - min_x + 1]
-        }
-    }
+    return start_person_offset
 }
 
 layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutOpts, allocator := context.allocator) -> (layout: Layout, err: runtime.Allocator_Error) #optional_allocator_error {
@@ -253,9 +257,7 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
     add_descendants_to_layout(pm, start_el, int(center_row + 1), &layout, opts)
     add_related_to_layout(pm, start_person, &layout.rows[center_row], &start_col, opts)
 
-    fmt.println(layout.rows[center_row + 1])
-
-    patch_coordinates(pm, start_person, &layout, allocator)
+    layout.coord_offset.x = patch_coordinates(pm, start_person, &layout, allocator)
 
     return layout, err
 }
