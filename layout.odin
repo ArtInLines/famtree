@@ -137,35 +137,29 @@ add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^i
     return left, right
 }
 
-should_display_child :: proc(pm: PersonManager, parent, child: PersonHandle, row: LayoutRow, opts: LayoutOpts) -> bool {
-    return ((LayoutFlags.Actual_Parents in opts.flags && is_actual_parent(pm, child, parent)) || is_official_parent(pm, child, parent)) &&
-           (LayoutFlags.Dead_Persons    in opts.flags || person_get(pm, child).death == {})      && child not_in row.persons_cache
-}
+add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) {
+    children_per_parent := make(map[PersonHandle][dynamic]PersonHandle, allocator=allocator)
+    for child in person_get_rels(pm, parent.ph).children {
+        if child in row.persons_cache do continue
+        if !(LayoutFlags.Dead_Persons in opts.flags || person_get(pm, child).death == {}) do continue
 
-add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts) {
-    // @Todo: Patch potentially duplicate x coordinates (by moving ancestors around) (return value by which parent was moved to the right, so that it can be offset again (either in patch_coordinates or when rendering))
-    // if opts.max_distance == 0 do return
-    // count := i32(0)
-    // for child in person_get_rels(pm, parent.ph).children {
-    //     if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) do count += 1
-    // }
-    // mid       := count/2
-    // next_opts := opts
-    // next_opts.max_distance -= 1
-    // i: i32 = 0
-    // for child in person_get_rels(pm, parent.ph).children {
-    //     if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) {
-    //         child := LayoutPersonEl { ph = child, x = parent.x + i - mid }
-    //         fmt.println("child:", child, ", ", person_get(pm, child.ph))
-    //         append_person_to_row(child, &layout.rows[children_row])
-    //         if opts.max_distance > 0 {
-    //             child_col := len(layout.rows[children_row].data) - int(i)
-    //             add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts)
-    //             add_related_to_layout(pm, child.ph, &layout.rows[children_row], &child_col, next_opts)
-    //         }
-    //         i += 1
-    //     }
-    // }
+        if LayoutFlags.Actual_Parents in opts.flags {
+            if is_actual_parent(pm, child, parent) {
+                other_parent := get_other_of_tuple(person_get_rels(pm, child).actual_parents, parent)
+                if other_parent not_in children_per_parent do children_per_parent[other_parent] := make([dynamic]PersonHandle, allocator=allocator)
+                append(&children_per_parent[other_parent], child)
+            }
+        } else if is_official_parent(pm, child, parent) {
+                other_parent := get_other_of_tuple(person_get_rels(pm, child).official_parents, parent)
+                if other_parent not_in children_per_parent do children_per_parent[other_parent] := make([dynamic]PersonHandle, allocator=allocator)
+                append(&children_per_parent[other_parent], child)
+        }
+    }
+
+    // @TODO: Parents should probably be sorted in some way
+    for _, children in children_per_parent {
+
+    }
 }
 
 add_ancestors_to_layout :: proc() {
@@ -187,7 +181,7 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
 
     // @Todo: Layout edges somehow
     add_ancestors_to_layout()
-    add_descendants_to_layout(pm, start_el, int(center_row + 1), &layout, opts)
+    add_descendants_to_layout(pm, start_el, int(center_row + 1), &layout, opts, allocator)
     add_related_to_layout(pm, &layout.rows[center_row], &start_col, opts)
 
     return layout, err
