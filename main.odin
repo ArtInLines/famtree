@@ -27,7 +27,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
         y := (f32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y
         for el in row.data {
             // fmt.println("Drawing:", person_get(pm, el.ph))
-            x := (el.x.(f32) - f32(layout.coord_offset.x))*(width + margin) + opts.offset.x
+            x := (el.x - f32(layout.coord_offset.x))*(width + margin) + opts.offset.x
             DrawRectangleV({ x, y }, { width, height }, GRAY)
             DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + padding), i32(y + padding), i32(height - 2*padding), WHITE)
         }
@@ -70,12 +70,12 @@ main :: proc() {
     rel_add(pm, Aleyne, { person = Falia,   type = RelType.Affair })
     rel_add(pm, Aleyne, { person = Harlen,  type = RelType.Married })
     rel_add(pm, Erren,  { person = Desmera, type = RelType.Married })
-    child_add(pm, Bethanys1,   Raymun, Bethany)
-    child_add(pm, Bethanys2,   Raymun, Bethany)
-    child_add(pm, Reynard,     Raymun, Clarice)
-    child_add(pm, Aleyne,      Raymun, Clarice)
-    child_add(pm, Erren,       Raymun, Clarice)
-    child_add(pm, SonOfAleyne, Aleyne, Harlen)
+    // child_add(pm, Bethanys1,   Raymun, Bethany)
+    // child_add(pm, Bethanys2,   Raymun, Bethany)
+    // child_add(pm, Reynard,     Raymun, Clarice)
+    // child_add(pm, Aleyne,      Raymun, Clarice)
+    // child_add(pm, Erren,       Raymun, Clarice)
+    // child_add(pm, SonOfAleyne, Aleyne, Harlen)
 
 
     layout_opts := LayoutOpts{ max_distance = 5, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }

@@ -21,7 +21,7 @@ LayoutOpts :: struct {
 UNKNOWN_X_COORD :: c.INT32_MIN
 
 // @Note: X-coordinates are always i32s until the function `patch_coordinates` is called
-LayoutXCoord :: union {i32, f32}
+LayoutXCoord :: f32
 
 LayoutPersonEl :: struct {
     ph: PersonHandle,
@@ -33,7 +33,6 @@ LayoutPersonEl :: struct {
 LayoutRow :: struct {
     data: [dynamic]LayoutPersonEl,
     persons_cache: map[PersonHandle]bool,
-    min_x, max_x: i32,
 }
 
 Layout :: struct {
@@ -75,63 +74,67 @@ iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandl
 }
 
 @(private="file")
-update_row_min_max_xs :: proc(row: ^LayoutRow, x: i32) {
-    if x != UNKNOWN_X_COORD {
-        if row.min_x == UNKNOWN_X_COORD || x < row.min_x {
-            row.min_x = x
-        }
-        if row.max_x == UNKNOWN_X_COORD || x > row.max_x {
-            row.max_x = x
-        }
-    }
-}
-
-@(private="file")
-inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int) {
+inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, placed_left: bool) {
     assert(col >= 0)
     inject_at(&row.data, col, person)
-    row.persons_cache[person.ph] = true
-    update_row_min_max_xs(row, person.x.(i32))
-}
-
-@(private="file")
-append_person_to_row :: proc(person: LayoutPersonEl, row: ^LayoutRow) {
-    append(&row.data, person)
-    row.persons_cache[person.ph] = true
-    update_row_min_max_xs(row, person.x.(i32))
-}
-
-add_related_to_layout :: proc(pm: PersonManager, start: PersonHandle, row: ^LayoutRow, start_col: ^int, opts: LayoutOpts) {
-    assert(start != {})
-    assert(start_col^ >= 0)
-    start_birth      := person_get(pm, start).birth
-    rels_of_start_p  := person_get_rels(pm, start)
-    #reverse for rel_type in opts.rels_to_show {
-        rels := rels_of_start_p.rels[rel_type][:]
-        from := rels_of_start_p.from[rel_type][:]
-        rel  := iter_rels_from_merged(pm, &rels, &from)
-        for rel != nil {
-            if rel.?.person != {} && (!rel.?.is_over || rel_type in opts.show_if_rel_over) {
-                next_birth  := person_get(pm, rel.?.person).birth
-                place_left  := date_is_before_simple(next_birth, start_birth)
-                next_col: int
-                if place_left {
-                    next_col = start_col^
-                    start_col^ += 1
-                } else {
-                    next_col = start_col^ + 1
-                }
-                inject_person_in_row({ ph = rel.?.person, x = UNKNOWN_X_COORD }, row, next_col)
-                next_opts := opts
-                next_opts.max_distance -= 1
-                if next_opts.max_distance > 0 && rel.?.person not_in row.persons_cache {
-                    add_related_to_layout(pm, rel.?.person, row, &next_col, next_opts)
-                    if place_left do start_col^ = next_col + 1
-                }
-            }
-            rel = iter_rels_from_merged(pm, &rels, &from)
+    fmt.println(col, person)
+    fmt.println(row.data)
+    if placed_left {
+        i := col - 1
+        for i > 0 && row.data[i].x < row.data[i+1].x - 1 {
+            row.data[i].x = row.data[i+1].x - 1
+            i -= 1
+        }
+    } else {
+        i := col + 1
+        for i < len(row.data) && row.data[i-1].x + 1 > row.data[i].x {
+            row.data[i].x = row.data[i-1].x + 1
+            i += 1
         }
     }
+    row.persons_cache[person.ph] = true
+}
+
+add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^int, opts: LayoutOpts) -> (left, right: i32) {
+    assert((rel_to_col^ >= 0) && (rel_to_col^ < len(row.data)))
+    rel_to := row.data[rel_to_col^]
+    birth  := person_get(pm, rel_to.ph).birth
+    #reverse for rel_type in opts.rels_to_show {
+        rels := person_get_rels(pm, rel_to.ph).rels[rel_type][:]
+        from := person_get_rels(pm, rel_to.ph).from[rel_type][:]
+        next_rel := iter_rels_from_merged(pm, &rels, &from)
+        for next_rel != nil {
+            rel := next_rel.?
+            if rel.person != {} && (!rel.is_over || rel_type in opts.show_if_rel_over) {
+                next_birth := person_get(pm, rel.person).birth
+                place_left := date_is_before_simple(next_birth, birth)
+                next_col: int
+                next_x: LayoutXCoord
+                if place_left {
+                    next_x   = rel_to.x
+                    next_col = rel_to_col^
+                    rel_to_col^ += 1
+                } else {
+                    next_x   = rel_to.x   + 1
+                    next_col = rel_to_col^ + 1
+                }
+                inject_person_in_row({ ph = rel.person, x = next_x }, row, next_col, place_left)
+                next_opts := opts
+                next_opts.max_distance -= 1
+                if next_opts.max_distance > 0 && rel.person not_in row.persons_cache {
+                    next_left, next_right := add_related_to_layout(pm, row, &next_col, next_opts)
+                    if place_left {
+                        rel_to_col^ = next_col + 1
+                        left += next_left + next_right
+                    } else {
+                        right += next_left + next_right
+                    }
+                }
+            }
+            next_rel = iter_rels_from_merged(pm, &rels, &from)
+        }
+    }
+    return left, right
 }
 
 should_display_child :: proc(pm: PersonManager, parent, child: PersonHandle, row: LayoutRow, opts: LayoutOpts) -> bool {
@@ -141,98 +144,32 @@ should_display_child :: proc(pm: PersonManager, parent, child: PersonHandle, row
 
 add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts) {
     // @Todo: Patch potentially duplicate x coordinates (by moving ancestors around) (return value by which parent was moved to the right, so that it can be offset again (either in patch_coordinates or when rendering))
-    if opts.max_distance == 0 do return
-    count := i32(0)
-    for child in person_get_rels(pm, parent.ph).children {
-        if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) do count += 1
-    }
-    mid       := count/2
-    next_opts := opts
-    next_opts.max_distance -= 1
-    i: i32 = 0
-    for child in person_get_rels(pm, parent.ph).children {
-        if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) {
-            child := LayoutPersonEl { ph = child, x = parent.x.(i32) + i - mid }
-            fmt.println("child:", child, ", ", person_get(pm, child.ph))
-            append_person_to_row(child, &layout.rows[children_row])
-            if opts.max_distance > 0 {
-                child_col := len(layout.rows[children_row].data) - int(i)
-                add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts)
-                add_related_to_layout(pm, child.ph, &layout.rows[children_row], &child_col, next_opts)
-            }
-            i += 1
-        }
-    }
+    // if opts.max_distance == 0 do return
+    // count := i32(0)
+    // for child in person_get_rels(pm, parent.ph).children {
+    //     if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) do count += 1
+    // }
+    // mid       := count/2
+    // next_opts := opts
+    // next_opts.max_distance -= 1
+    // i: i32 = 0
+    // for child in person_get_rels(pm, parent.ph).children {
+    //     if should_display_child(pm, parent.ph, child, layout.rows[children_row], opts) {
+    //         child := LayoutPersonEl { ph = child, x = parent.x + i - mid }
+    //         fmt.println("child:", child, ", ", person_get(pm, child.ph))
+    //         append_person_to_row(child, &layout.rows[children_row])
+    //         if opts.max_distance > 0 {
+    //             child_col := len(layout.rows[children_row].data) - int(i)
+    //             add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts)
+    //             add_related_to_layout(pm, child.ph, &layout.rows[children_row], &child_col, next_opts)
+    //         }
+    //         i += 1
+    //     }
+    // }
 }
 
 add_ancestors_to_layout :: proc() {
 
-}
-
-patch_coordinates :: proc(pm: PersonManager, start_person: PersonHandle, layout: ^Layout, allocator := context.allocator) -> (start_person_offset: f32) {
-    min_x: i32 = 0
-    max_x: i32 = 0
-    for row in layout.rows {
-        if row.min_x != UNKNOWN_X_COORD do min_x = min(min_x, row.min_x)
-        if row.max_x != UNKNOWN_X_COORD do max_x = max(max_x, row.max_x)
-    }
-
-    // @Note: coord_map stores the amount of persons that need to be fit in between any two coordinates
-    // at index 0 are the amount of persons that appear before any person with a locked x coordinate
-    // at the last index are the amount of persons that appear after any person with a locked x coordinate
-    coord_map_idx_offset := abs(min_x) - 1
-    coord_map := make([]f32, max_x - min_x + 3, allocator=allocator)
-    for row in layout.rows {
-        count      := 0
-        last_idx   := -1
-        last_coord := UNKNOWN_X_COORD
-        last_patched_coord: f32
-        for el, i in row.data {
-            if el.x.(i32) == UNKNOWN_X_COORD {
-                count += 1
-            } else {
-                if last_coord == UNKNOWN_X_COORD {
-                    last_coord = min_x - 1
-                    last_patched_coord = f32(last_coord)
-                }
-                cur_coord := el.x.(i32)
-                unfilled_coords_count  := el.x.(i32) - last_coord
-                persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
-                for i in coord_map_idx_offset - last_coord ..< coord_map_idx_offset + el.x.(i32) {
-                    coord_map[i] = max(coord_map[i], persons_per_prev_coord)
-                }
-                for j in 0..<count {
-                    row.data[j+(i-count)].x = last_patched_coord + 1
-                    last_patched_coord      = row.data[j+(i-count)].x.(f32)
-                }
-                row.data[i].x = max(last_patched_coord, f32(row.data[i].x.(i32)))
-                last_patched_coord = row.data[i].x.(f32)
-                if el.ph == start_person do start_person_offset = last_patched_coord
-                last_coord = el.x.(i32) // @Note: works even though all x coordinates are transformed into floats, bc `el` is a copy
-                last_idx   = i
-                count      = 0
-            }
-        }
-
-        // fmt.println(row)
-        assert((row.max_x == UNKNOWN_X_COORD) == (len(row.data) == 0))
-        if row.max_x != UNKNOWN_X_COORD {
-            unfilled_coords_count  := max_x + 1 - row.max_x
-            // fmt.println("unfilled_coords_count: ", unfilled_coords_count)
-            persons_per_prev_coord := unfilled_coords_count == 0 ? 0 : f32(count) / f32(unfilled_coords_count)
-            // fmt.println("persons_per_prev_coord: ", persons_per_prev_coord)
-            // fmt.println("last_patched_coord: ", last_patched_coord)
-            // fmt.println("last_coord: ", last_coord)
-            for i in coord_map_idx_offset + row.max_x ..< coord_map_idx_offset + max_x {
-                coord_map[i] = max(coord_map[i], persons_per_prev_coord)
-            }
-            for j in 1..=count {
-                row.data[j+last_idx].x = last_patched_coord + 1
-                last_patched_coord     = row.data[j+last_idx].x.(f32)
-            }
-        }
-    }
-    return start_person_offset
 }
 
 layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutOpts, allocator := context.allocator) -> (layout: Layout, err: runtime.Allocator_Error) #optional_allocator_error {
@@ -242,22 +179,16 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
         layout.rows[i] = {
             data          = make([dynamic]LayoutPersonEl, allocator=allocator),
             persons_cache = make(map[PersonHandle]bool,   allocator=allocator),
-            min_x = UNKNOWN_X_COORD,
-            max_x = UNKNOWN_X_COORD,
         }
     }
     start_col := 0
     start_el  := LayoutPersonEl{ ph = start_person, x = 0 }
-    inject_person_in_row(start_el, &layout.rows[center_row], start_col)
-    layout.rows[center_row].min_x = start_el.x.(i32)
-    layout.rows[center_row].max_x = start_el.x.(i32)
+    inject_person_in_row(start_el, &layout.rows[center_row], start_col, false)
 
     // @Todo: Layout edges somehow
     add_ancestors_to_layout()
     add_descendants_to_layout(pm, start_el, int(center_row + 1), &layout, opts)
-    add_related_to_layout(pm, start_person, &layout.rows[center_row], &start_col, opts)
-
-    layout.coord_offset.x = patch_coordinates(pm, start_person, &layout, allocator)
+    add_related_to_layout(pm, &layout.rows[center_row], &start_col, opts)
 
     return layout, err
 }
