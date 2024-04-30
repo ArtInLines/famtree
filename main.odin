@@ -5,16 +5,22 @@ import "core:fmt"
 import "core:strings"
 import rl "vendor:raylib"
 
-DEFAULT_PERSON_WIDTH  :: 150
-DEFAULT_PERSON_HEIGHT :: 30
-DEFAULT_PERSON_MARGIN :: 20
-DEFAULT_PERSON_PAD    :: 5
+DEFAULT_PERSON_WIDTH    :: 150
+DEFAULT_PERSON_HEIGHT   :: 30
+DEFAULT_PERSON_MARGIN   :: 20
+DEFAULT_PERSON_PAD      :: 5
 MOUSE_WHEEL_ZOOM_FACTOR :: 0.2
+DEFAULT_LINE_THICKNESS  :: 5
+DEFAULT_LINE_COLOR      :: rl.WHITE
 
 DisplayOpts :: struct {
     screen: [2]f32,
     offset: [2]f32,
     zoom: f32,
+}
+
+draw_layout_get_person_x_coord :: #force_inline proc(el: LayoutPersonEl, layout: Layout, width, margin, offset_x: f32) -> f32 {
+    return (el.x - f32(layout.coord_offset.x))*(width + margin) + offset_x
 }
 
 draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
@@ -23,13 +29,35 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
     height  := opts.zoom*DEFAULT_PERSON_HEIGHT
     margin  := opts.zoom*DEFAULT_PERSON_MARGIN
     padding := opts.zoom*DEFAULT_PERSON_PAD
+
+    person_to_idx := make(map[PersonHandle]int, allocator=context.temp_allocator)
+
     for row, i in layout.rows {
+        clear(&person_to_idx)
         y := (f32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y
-        for el in row.data {
-            // fmt.println("Drawing:", person_get(pm, el.ph))
-            x := (el.x - f32(layout.coord_offset.x))*(width + margin) + opts.offset.x
+        for el, i in row.data {
+            x := draw_layout_get_person_x_coord(el, layout, width, margin, opts.offset.x)
             DrawRectangleV({ x, y }, { width, height }, GRAY)
             DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + padding), i32(y + padding), i32(height - 2*padding), WHITE)
+            person_to_idx[el.ph] = i
+        }
+
+        for from, rels in row.rels {
+            from_el := row.data[person_to_idx[from]]
+            for to in rels {
+                to_el := row.data[person_to_idx[to]]
+                if person_to_idx[from] - person_to_idx[to] == 1 {
+                    from_pos := Vector2{ draw_layout_get_person_x_coord(from_el, layout, width, margin, opts.offset.x),         y + height/2 }
+                    to_pos   := Vector2{ draw_layout_get_person_x_coord(to_el,   layout, width, margin, opts.offset.x) + width, y + height/2 }
+                    DrawLineEx(from_pos, to_pos, opts.zoom*DEFAULT_LINE_THICKNESS, DEFAULT_LINE_COLOR)
+                } else if person_to_idx[from] - person_to_idx[to] == -1 {
+                    from_pos := Vector2{ draw_layout_get_person_x_coord(from_el, layout, width, margin, opts.offset.x) + width, y + height/2 }
+                    to_pos   := Vector2{ draw_layout_get_person_x_coord(to_el,   layout, width, margin, opts.offset.x),         y + height/2 }
+                    DrawLineEx(from_pos, to_pos, opts.zoom*DEFAULT_LINE_THICKNESS, DEFAULT_LINE_COLOR)
+                } else {
+                    //  @TODO
+                }
+            }
         }
     }
 }

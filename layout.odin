@@ -32,7 +32,7 @@ LayoutPersonEl :: struct {
 
 LayoutRow :: struct {
     data: [dynamic]LayoutPersonEl,
-    persons_cache: map[PersonHandle]bool,
+    rels: map[PersonHandle][dynamic]PersonHandle, // can also be used to quickly check if a person is already in this row
 }
 
 Layout :: struct {
@@ -74,11 +74,10 @@ iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandl
 }
 
 @(private="file")
-inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int) {
+inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, allocator := context.allocator) {
     assert(col >= 0)
+    assert(person.ph not_in row.rels)
     inject_at(&row.data, col, person)
-    fmt.println(col, person)
-    fmt.println(row.data)
 
     i := col - 1
     for i > 0 && row.data[i].x < row.data[i+1].x - 1 {
@@ -90,7 +89,7 @@ inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int) 
         row.data[i].x = row.data[i-1].x + 1
         i += 1
     }
-    row.persons_cache[person.ph] = true
+    row.rels[person.ph] = make([dynamic]PersonHandle, allocator=allocator)
 }
 
 add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^int, opts: LayoutOpts) -> (left, right: i32) {
@@ -116,10 +115,11 @@ add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^i
                     next_x   = rel_to.x   + 1
                     next_col = rel_to_col^ + 1
                 }
+                append(&row.rels[rel_to.ph], rel.person)
                 inject_person_in_row({ ph = rel.person, x = next_x }, row, next_col)
                 next_opts := opts
                 next_opts.max_distance -= 1
-                if next_opts.max_distance > 0 && rel.person not_in row.persons_cache {
+                if next_opts.max_distance > 0 && rel.person not_in row.rels {
                     next_left, next_right := add_related_to_layout(pm, row, &next_col, next_opts)
                     if place_left {
                         rel_to_col^ = next_col + 1
@@ -140,7 +140,7 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     children_count := 0
     children_per_parent := make(map[PersonHandle][dynamic]PersonHandle, allocator=allocator)
     for child in person_get_rels(pm, parent.ph).children {
-        if child in row.persons_cache do continue
+        if child in row.rels do continue
         if !(LayoutFlags.Dead_Persons in opts.flags || person_get(pm, child).death == {}) do continue
 
         if LayoutFlags.Actual_Parents in opts.flags {
@@ -199,8 +199,8 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
     layout.rows = make([]LayoutRow, 2*opts.max_distance + 1, allocator)
     for _, i in layout.rows {
         layout.rows[i] = {
-            data          = make([dynamic]LayoutPersonEl, allocator=allocator),
-            persons_cache = make(map[PersonHandle]bool,   allocator=allocator),
+            data = make([dynamic]LayoutPersonEl, allocator=allocator),
+            rels = make(map[PersonHandle][dynamic]PersonHandle,   allocator=allocator),
         }
     }
     start_col := 0
