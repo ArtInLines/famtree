@@ -74,23 +74,21 @@ iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandl
 }
 
 @(private="file")
-inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, placed_left: bool) {
+inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int) {
     assert(col >= 0)
     inject_at(&row.data, col, person)
     fmt.println(col, person)
     fmt.println(row.data)
-    if placed_left {
-        i := col - 1
-        for i > 0 && row.data[i].x < row.data[i+1].x - 1 {
-            row.data[i].x = row.data[i+1].x - 1
-            i -= 1
-        }
-    } else {
-        i := col + 1
-        for i < len(row.data) && row.data[i-1].x + 1 > row.data[i].x {
-            row.data[i].x = row.data[i-1].x + 1
-            i += 1
-        }
+
+    i := col - 1
+    for i > 0 && row.data[i].x < row.data[i+1].x - 1 {
+        row.data[i].x = row.data[i+1].x - 1
+        i -= 1
+    }
+    i = col + 1
+    for i < len(row.data) && row.data[i-1].x + 1 > row.data[i].x {
+        row.data[i].x = row.data[i-1].x + 1
+        i += 1
     }
     row.persons_cache[person.ph] = true
 }
@@ -118,7 +116,7 @@ add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^i
                     next_x   = rel_to.x   + 1
                     next_col = rel_to_col^ + 1
                 }
-                inject_person_in_row({ ph = rel.person, x = next_x }, row, next_col, place_left)
+                inject_person_in_row({ ph = rel.person, x = next_x }, row, next_col)
                 next_opts := opts
                 next_opts.max_distance -= 1
                 if next_opts.max_distance > 0 && rel.person not_in row.persons_cache {
@@ -138,27 +136,57 @@ add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^i
 }
 
 add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) {
+    row := &layout.rows[children_row]
+    children_count := 0
     children_per_parent := make(map[PersonHandle][dynamic]PersonHandle, allocator=allocator)
     for child in person_get_rels(pm, parent.ph).children {
         if child in row.persons_cache do continue
         if !(LayoutFlags.Dead_Persons in opts.flags || person_get(pm, child).death == {}) do continue
 
         if LayoutFlags.Actual_Parents in opts.flags {
-            if is_actual_parent(pm, child, parent) {
-                other_parent := get_other_of_tuple(person_get_rels(pm, child).actual_parents, parent)
-                if other_parent not_in children_per_parent do children_per_parent[other_parent] := make([dynamic]PersonHandle, allocator=allocator)
+            if is_actual_parent(pm, child, parent.ph) {
+                other_parent := get_other_of_tuple(person_get_rels(pm, child).actual_parents, parent.ph)
+                if other_parent not_in children_per_parent do children_per_parent[other_parent] = make([dynamic]PersonHandle, allocator=allocator)
                 append(&children_per_parent[other_parent], child)
+                children_count += 1
             }
-        } else if is_official_parent(pm, child, parent) {
-                other_parent := get_other_of_tuple(person_get_rels(pm, child).official_parents, parent)
-                if other_parent not_in children_per_parent do children_per_parent[other_parent] := make([dynamic]PersonHandle, allocator=allocator)
+        } else if is_official_parent(pm, child, parent.ph) {
+                other_parent := get_other_of_tuple(person_get_rels(pm, child).official_parents, parent.ph)
+                if other_parent not_in children_per_parent do children_per_parent[other_parent] = make([dynamic]PersonHandle, allocator=allocator)
                 append(&children_per_parent[other_parent], child)
+                children_count += 1
         }
     }
 
     // @TODO: Parents should probably be sorted in some way
+    idx := 0
+    all_children := make([]PersonHandle, children_count, allocator)
     for _, children in children_per_parent {
+        for c in children {
+            all_children[idx] = c
+            idx += 1
+        }
+    }
 
+    mid     := f32(children_count) / 2
+    start_x := parent.x - mid
+    col     := 0
+    for col < len(row.data) && start_x < row.data[col].x do col += 1
+
+    next_opts := opts
+    next_opts.max_distance -= 1
+
+    for c, i in all_children {
+        child := LayoutPersonEl{ ph = c, x = parent.x + f32(i) - mid }
+        inject_person_in_row(child, row, col)
+        if next_opts.max_distance > 0 {
+            add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts, allocator)
+            add_ancestors_to_layout()
+            l, r := add_related_to_layout(pm, row, &col, next_opts)
+            col += int(r)
+        } else {
+            col += 1
+        }
     }
 }
 
@@ -177,7 +205,7 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
     }
     start_col := 0
     start_el  := LayoutPersonEl{ ph = start_person, x = 0 }
-    inject_person_in_row(start_el, &layout.rows[center_row], start_col, false)
+    inject_person_in_row(start_el, &layout.rows[center_row], start_col)
 
     // @Todo: Layout edges somehow
     add_ancestors_to_layout()
