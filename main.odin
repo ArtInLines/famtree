@@ -5,13 +5,14 @@ import "core:fmt"
 import "core:strings"
 import rl "vendor:raylib"
 
-DEFAULT_PERSON_WIDTH    :: 150
-DEFAULT_PERSON_HEIGHT   :: 30
-DEFAULT_PERSON_MARGIN   :: 20
+DEFAULT_PERSON_WIDTH    :: 200
+DEFAULT_PERSON_HEIGHT   :: 40
+DEFAULT_PERSON_MARGIN   :: 30
 DEFAULT_PERSON_PAD      :: 5
 MOUSE_WHEEL_ZOOM_FACTOR :: 0.2
-DEFAULT_LINE_THICKNESS  :: 5
-DEFAULT_LINE_COLOR      :: rl.WHITE
+DEFAULT_REL_THICKNESS   :: 2
+DEFAULT_REL_PAD         :: 2
+DEFAULT_REL_COLOR       :: rl.BLUE
 
 DisplayOpts :: struct {
     screen: [2]f32,
@@ -25,10 +26,13 @@ draw_layout_get_person_x_coord :: #force_inline proc(el: LayoutPersonEl, layout:
 
 draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
     using rl
-    width   := opts.zoom*DEFAULT_PERSON_WIDTH
-    height  := opts.zoom*DEFAULT_PERSON_HEIGHT
+    width   := max(opts.zoom*DEFAULT_PERSON_WIDTH, 1)
+    height  := max(opts.zoom*DEFAULT_PERSON_HEIGHT, 1)
     margin  := opts.zoom*DEFAULT_PERSON_MARGIN
     padding := opts.zoom*DEFAULT_PERSON_PAD
+    rel_thickness := max(opts.zoom*DEFAULT_REL_THICKNESS, 1)
+    rel_pad       := opts.zoom*DEFAULT_PERSON_PAD
+    rel_color     := DEFAULT_REL_COLOR
 
     person_to_idx := make(map[PersonHandle]int, allocator=context.temp_allocator)
 
@@ -45,17 +49,26 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
         for from, rels in row.rels {
             from_el := row.data[person_to_idx[from]]
             for to in rels {
-                to_el := row.data[person_to_idx[to]]
-                if person_to_idx[from] - person_to_idx[to] == 1 {
-                    from_pos := Vector2{ draw_layout_get_person_x_coord(from_el, layout, width, margin, opts.offset.x),         y + height/2 }
-                    to_pos   := Vector2{ draw_layout_get_person_x_coord(to_el,   layout, width, margin, opts.offset.x) + width, y + height/2 }
-                    DrawLineEx(from_pos, to_pos, opts.zoom*DEFAULT_LINE_THICKNESS, DEFAULT_LINE_COLOR)
-                } else if person_to_idx[from] - person_to_idx[to] == -1 {
-                    from_pos := Vector2{ draw_layout_get_person_x_coord(from_el, layout, width, margin, opts.offset.x) + width, y + height/2 }
-                    to_pos   := Vector2{ draw_layout_get_person_x_coord(to_el,   layout, width, margin, opts.offset.x),         y + height/2 }
-                    DrawLineEx(from_pos, to_pos, opts.zoom*DEFAULT_LINE_THICKNESS, DEFAULT_LINE_COLOR)
+                to_el     := row.data[person_to_idx[to]]
+                left      := (person_to_idx[from] < person_to_idx[to]) ? from : to
+                right     := (person_to_idx[from] < person_to_idx[to]) ? to   : from
+                left_el   := row.data[person_to_idx[left]]
+                right_el  := row.data[person_to_idx[right]]
+                left_pos  := Vector2{ draw_layout_get_person_x_coord(left_el,  layout, width, margin, opts.offset.x) + width, y + height/2 }
+                right_pos := Vector2{ draw_layout_get_person_x_coord(right_el, layout, width, margin, opts.offset.x),         y + height/2 }
+
+                if person_to_idx[right] - person_to_idx[left] == 1 {
+                    DrawLineEx(left_pos, right_pos, rel_thickness, rel_color)
                 } else {
-                    //  @TODO
+                    a := left_pos + {(margin - rel_pad)/2, 0}
+                    b := a + {0, -(height + rel_thickness + margin)/2}
+                    c := b + {(right_el.x - left_el.x)*(width + margin) - width - margin, 0}
+                    d := c + {0, (height + rel_thickness + margin)/2}
+                    DrawLineEx(left_pos, a, rel_thickness, rel_color)
+                    DrawLineEx(a, b, rel_thickness, rel_color)
+                    DrawLineEx(b, c, rel_thickness, rel_color)
+                    DrawLineEx(c, d, rel_thickness, rel_color)
+                    DrawLineEx(d, right_pos, rel_thickness, rel_color)
                 }
             }
         }
