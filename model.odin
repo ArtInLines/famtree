@@ -63,7 +63,8 @@ RelType :: enum u8 {
 
 Rel :: struct {
     id:         RelInternalID,
-    person:     PersonHandle,
+    to:         PersonHandle,
+    from:       PersonHandle,
     type:       RelType,
     is_over:    bool,
     start, end: Date, // @Note: Only change start through `rel_set_start`
@@ -170,7 +171,7 @@ person_set_birth :: #force_inline proc(pm: PersonManager, ph: PersonHandle, new_
 
 handle_of_rel :: #force_inline proc(rel: Rel) -> RelHandle {
     return RelHandle {
-        ph = rel.person,
+        ph = rel.from,
         id = rel.id,
     }
 }
@@ -278,7 +279,7 @@ rel_set_start :: #force_inline proc(pm: PersonManager, rh: RelHandle, new_start:
             rels := &pm.rels[rh.ph].rels[type]
             if rels[i].id == rh.id {
                 rels[i].start = new_start
-                sort_from_rels(pm, &person_get_rels_ptr(pm, rels[i].person).from[type], type)
+                sort_from_rels(pm, &person_get_rels_ptr(pm, rels[i].to).from[type], type)
                 sort_rels(pm, rels)
             }
         }
@@ -303,7 +304,7 @@ person_add :: proc(pm: ^PersonManager, p: Person) -> (ph: PersonHandle, err: run
 
 @(private="file")
 rm_rel_ref_in_from_list :: proc(pm: PersonManager, rel: Rel) {
-    from := &person_get_rels_ptr(pm, rel.person).from[rel.type]
+    from := &person_get_rels_ptr(pm, rel.to).from[rel.type]
     for _, i in from {
         if from[i] == handle_of_rel(rel) {
             ordered_remove(from, i)
@@ -343,13 +344,13 @@ person_rm :: proc(pm: ^PersonManager, ph: PersonHandle) {
     }
 }
 
-rel_add :: proc(pm: PersonManager, from: PersonHandle, rel: Rel) -> (val: RelHandle, err: runtime.Allocator_Error) #optional_allocator_error {
+rel_add :: proc(pm: PersonManager, rel: Rel) -> (val: RelHandle, err: runtime.Allocator_Error) #optional_allocator_error {
     r := rel
-    r.id = pm.rels[from].next_id
-    pm.rels[from].next_id += 1
+    r.id = pm.rels[rel.from].next_id
+    pm.rels[rel.from].next_id += 1
     val   = handle_of_rel(r)
-    err   = rel_insert_sorted(&pm.rels[from].rels[rel.type], r)
-    err2 := from_insert_sorted(pm, &pm.rels[rel.person].from[rel.type], val)
+    err   = rel_insert_sorted(&pm.rels[rel.from].rels[rel.type], r)
+    err2 := from_insert_sorted(pm, &pm.rels[rel.to].from[rel.type], val)
     if err == nil do err = err2
     return val, err
 }

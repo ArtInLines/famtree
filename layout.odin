@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:math"
 import "core:mem"
 import "core:c"
-import "core:fmt" // @nocheckin
+import "core:fmt" // @Cleanup
 
 LayoutFlags :: enum {
     Actual_Parents,
@@ -26,8 +26,6 @@ LayoutXCoord :: f32
 LayoutPersonEl :: struct {
     ph: PersonHandle,
     x:  LayoutXCoord,
-    // additional_x_offset: i32,
-
 }
 
 LayoutRow :: struct {
@@ -48,34 +46,37 @@ index_of_person :: proc(arr: []LayoutPersonEl, ph: PersonHandle) -> int {
 }
 
 @(private="file") // @Note: updates rels & from
-iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandle) -> Maybe(Rel) {
+iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandle) -> (res: Maybe(Rel), is_of_rels_arr: bool) {
+    is_of_rels_arr = false
     if len(rels) == 0 {
-        if len(from) == 0 do return nil
+        if len(from) == 0 do res = nil
         else {
-            res  := rel_get(pm, from[0])
+            res = rel_get(pm, from[0])
             from^ = from[1:]
-            return res
         }
     } else if len(from) == 0 {
-        res := rels[0]
+        is_of_rels_arr = true
+        res = rels[0]
         rels^ = rels[1:]
-        return res
     } else {
         r := rels[0]
         f := rel_get(pm, from[0])
         if date_is_before_simple(r.start, f.start) {
+            is_of_rels_arr = true
             rels^ = rels[1:]
-            return r
+            res = r
         } else {
             from^ = from[1:]
-            return f
+            res = f
         }
     }
+    return res, is_of_rels_arr
 }
 
 @(private="file")
 inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, allocator := context.allocator) {
     assert(col >= 0)
+    if person.ph in row.rels do return
     assert(person.ph not_in row.rels)
     inject_at(&row.data, col, person)
 
@@ -92,18 +93,22 @@ inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, 
     row.rels[person.ph] = make([dynamic]PersonHandle, allocator=allocator)
 }
 
-add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^int, opts: LayoutOpts) -> (left, right: i32) {
+add_related_to_layout :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) -> (left, right: i32) {
+    row := &layout.rows[cur_row]
     assert((rel_to_col^ >= 0) && (rel_to_col^ < len(row.data)))
     rel_to := row.data[rel_to_col^]
+    // fmt.println("relative to: ", person_get(pm, rel_to.ph).name, "max_distance: ", opts.max_distance)
     birth  := person_get(pm, rel_to.ph).birth
     #reverse for rel_type in opts.rels_to_show {
         rels := person_get_rels(pm, rel_to.ph).rels[rel_type][:]
         from := person_get_rels(pm, rel_to.ph).from[rel_type][:]
-        next_rel := iter_rels_from_merged(pm, &rels, &from)
+
+        next_rel, is_of_rels_arr := iter_rels_from_merged(pm, &rels, &from)
         for next_rel != nil {
             rel := next_rel.?
-            if rel.person != {} && (!rel.is_over || rel_type in opts.show_if_rel_over) {
-                next_birth := person_get(pm, rel.person).birth
+            next_person := is_of_rels_arr ? rel.to : rel.from
+            if next_person != {} && (!rel.is_over || rel_type in opts.show_if_rel_over) {
+                next_birth := person_get(pm, next_person).birth
                 place_left := date_is_before_simple(next_birth, birth)
                 next_col: int
                 next_x: LayoutXCoord
@@ -115,12 +120,16 @@ add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^i
                     next_x   = rel_to.x   + 1
                     next_col = rel_to_col^ + 1
                 }
-                append(&row.rels[rel_to.ph], rel.person)
-                inject_person_in_row({ ph = rel.person, x = next_x }, row, next_col)
+                next_person_el := LayoutPersonEl{ ph = next_person, x = next_x }
+                inject_person_in_row(next_person_el, row, next_col)
+                if is_of_rels_arr do append(&row.rels[rel_to.ph],   next_person)
+                else              do append(&row.rels[next_person], rel_to.ph)
                 next_opts := opts
                 next_opts.max_distance -= 1
-                if next_opts.max_distance > 0 && rel.person not_in row.rels {
-                    next_left, next_right := add_related_to_layout(pm, row, &next_col, next_opts)
+                if next_opts.max_distance > 0 {
+                    add_descendants_to_layout(pm, next_person_el, cur_row + 1, layout, next_opts, allocator)
+                    add_ancestors_to_layout()
+                    next_left, next_right := add_related_to_layout(pm, cur_row, &next_col, layout, next_opts, allocator)
                     if place_left {
                         rel_to_col^ = next_col + 1
                         left += next_left + next_right
@@ -129,13 +138,13 @@ add_related_to_layout :: proc(pm: PersonManager, row: ^LayoutRow, rel_to_col: ^i
                     }
                 }
             }
-            next_rel = iter_rels_from_merged(pm, &rels, &from)
+            next_rel, is_of_rels_arr = iter_rels_from_merged(pm, &rels, &from)
         }
     }
     return left, right
 }
 
-add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) {
+add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: u16, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) {
     row := &layout.rows[children_row]
     children_count := 0
     children_per_parent := make(map[PersonHandle][dynamic]PersonHandle, allocator=allocator)
@@ -182,7 +191,8 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
         if next_opts.max_distance > 0 {
             add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts, allocator)
             add_ancestors_to_layout()
-            l, r := add_related_to_layout(pm, row, &col, next_opts)
+            child_col := index_of(row.data[:], child)
+            l, r := add_related_to_layout(pm, children_row, &child_col, layout, next_opts, allocator)
             col += int(r)
         } else {
             col += 1
@@ -209,8 +219,8 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
 
     // @Todo: Layout edges somehow
     add_ancestors_to_layout()
-    add_descendants_to_layout(pm, start_el, int(center_row + 1), &layout, opts, allocator)
-    add_related_to_layout(pm, &layout.rows[center_row], &start_col, opts)
+    add_descendants_to_layout(pm, start_el, center_row + 1, &layout, opts, allocator)
+    add_related_to_layout(pm, center_row, &start_col, &layout, opts, allocator)
 
     return layout, err
 }
