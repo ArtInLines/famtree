@@ -26,7 +26,7 @@ draw_layout_get_person_x_coord :: #force_inline proc(el: LayoutPersonEl, layout:
     return (el.x - f32(layout.coord_offset.x))*(width + margin) + offset_x
 }
 
-draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) -> (selected_person: PersonHandle) {
+draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, opts: DisplayOpts) -> (selected_person: PersonHandle) {
     using rl
     // @Note: These variables are used to track how many frames a person was pressed, to prevent dragging to count as pressing.
     // @TODO: A better method would probably be to only count it as a press, if the mouse didn't move too much
@@ -50,6 +50,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) -> (se
         for el, j in row.data {
             x := draw_layout_get_person_x_coord(el, layout, width, margin, opts.offset.x)
             DrawRectangleV({ x, y }, { width, height }, GRAY)
+            if el.ph == root_ph do DrawRectangleLinesEx({x, y, width, height}, padding/2, BLUE)
             DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + padding), i32(y + padding), i32(height - 2*padding), WHITE)
             person_to_idx[el.ph] = j
 
@@ -139,8 +140,9 @@ main :: proc() {
     child_add(pm, SonOfAleyne, Aleyne, Harlen)
 
 
+    root_ph := Raymun
     layout_opts := LayoutOpts{ max_distance = 5, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
-    layout := layout_tree(pm, Raymun, layout_opts)
+    layout := layout_tree(pm, root_ph, layout_opts)
     fmt.println(layout)
 
     display_opts := DisplayOpts {
@@ -169,8 +171,11 @@ main :: proc() {
 
         BeginDrawing()
             ClearBackground(BLACK)
-            selected_person := draw_layout(pm, layout, display_opts)
-            if selected_person != {} do layout = layout_tree(pm, selected_person, layout_opts)
+            selected_person := draw_layout(pm, layout, root_ph, display_opts)
+            if selected_person != {} {
+                root_ph = selected_person
+                layout  = layout_tree(pm, root_ph, layout_opts)
+            }
 
             DrawFPS(10, 10)
             SetMouseCursor(cursor)
