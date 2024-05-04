@@ -14,6 +14,8 @@ DEFAULT_REL_THICKNESS   :: 2
 DEFAULT_REL_PAD         :: 2
 DEFAULT_REL_COLOR       :: rl.BLUE
 
+cursor: rl.MouseCursor
+
 DisplayOpts :: struct {
     screen: [2]f32,
     offset: [2]f32,
@@ -24,8 +26,14 @@ draw_layout_get_person_x_coord :: #force_inline proc(el: LayoutPersonEl, layout:
     return (el.x - f32(layout.coord_offset.x))*(width + margin) + offset_x
 }
 
-draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
+draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) -> (selected_person: PersonHandle) {
     using rl
+    // @Note: These variables are used to track how many frames a person was pressed, to prevent dragging to count as pressing.
+    // @TODO: A better method would probably be to only count it as a press, if the mouse didn't move too much
+    @(static) last_selected_person: PersonHandle = 0
+    @(static) selected_frame_count: u32 = 0
+    pressed_person: PersonHandle = 0
+
     width   := max(opts.zoom*DEFAULT_PERSON_WIDTH, 1)
     height  := max(opts.zoom*DEFAULT_PERSON_HEIGHT, 1)
     margin  := opts.zoom*DEFAULT_PERSON_MARGIN
@@ -39,19 +47,26 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
     for row, i in layout.rows {
         clear(&person_to_idx)
         y := (f32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y
-        for el, i in row.data {
+        for el, j in row.data {
             x := draw_layout_get_person_x_coord(el, layout, width, margin, opts.offset.x)
             DrawRectangleV({ x, y }, { width, height }, GRAY)
             DrawText(strings.clone_to_cstring(person_get(pm, el.ph).name), i32(x + padding), i32(y + padding), i32(height - 2*padding), WHITE)
-            person_to_idx[el.ph] = i
+            person_to_idx[el.ph] = j
+
+            if CheckCollisionPointRec(GetMousePosition(), { x, y, width, height }) {
+                cursor = MouseCursor.POINTING_HAND
+                if IsMouseButtonDown(.LEFT) do pressed_person = el.ph
+                if IsMouseButtonReleased(.LEFT) && selected_frame_count <= 10 do selected_person = el.ph // @Cleanup: Replace magic number with configurable variable
+            }
         }
 
         for from, rels in row.rels {
             from_el := row.data[person_to_idx[from]]
             for to in rels {
                 to_el     := row.data[person_to_idx[to]]
-                left      := (person_to_idx[from] < person_to_idx[to]) ? from : to
-                right     := (person_to_idx[from] < person_to_idx[to]) ? to   : from
+                is_left   := person_to_idx[from] < person_to_idx[to]
+                left      := is_left ? from : to
+                right     := is_left ? to   : from
                 left_el   := row.data[person_to_idx[left]]
                 right_el  := row.data[person_to_idx[right]]
                 left_pos  := Vector2{ draw_layout_get_person_x_coord(left_el,  layout, width, margin, opts.offset.x) + width, y + height/2 }
@@ -62,6 +77,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
                 } else {
                     a := left_pos + {(margin - rel_pad)/2, 0}
                     b := a + {0, -(height + rel_thickness + margin)/2}
+
                     c := b + {(right_el.x - left_el.x)*(width + margin) - width - margin, 0}
                     d := c + {0, (height + rel_thickness + margin)/2}
                     DrawLineEx(left_pos, a, rel_thickness, rel_color)
@@ -73,6 +89,10 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, opts: DisplayOpts) {
             }
         }
     }
+    if pressed_person == last_selected_person do selected_frame_count += 1
+    else                                      do selected_frame_count = 0
+    last_selected_person = pressed_person
+    return selected_person
 }
 
 get_default_offset :: proc(screen: [2]f32, zoom: f32, max_layout_distance: f32) -> (offset: [2]f32) {
@@ -83,8 +103,8 @@ get_default_offset :: proc(screen: [2]f32, zoom: f32, max_layout_distance: f32) 
 
 main :: proc() {
     using rl
-    win_width  : i32 = 800
-    win_height : i32 = 600
+    win_width  : i32 = 1600
+    win_height : i32 = 800
     SetConfigFlags({.WINDOW_RESIZABLE})
     InitWindow(win_width, win_height, "Family Tree Maker")
     SetTargetFPS(60)
@@ -130,6 +150,7 @@ main :: proc() {
     display_opts.offset = get_default_offset(display_opts.screen, display_opts.zoom, f32(layout_opts.max_distance))
 
     for !WindowShouldClose() {
+        cursor = MouseCursor.DEFAULT
         if IsWindowResized() {
             win_width  = GetScreenWidth()
             win_height = GetScreenHeight()
@@ -148,8 +169,11 @@ main :: proc() {
 
         BeginDrawing()
             ClearBackground(BLACK)
-            draw_layout(pm, layout, display_opts)
+            selected_person := draw_layout(pm, layout, display_opts)
+            if selected_person != {} do layout = layout_tree(pm, selected_person, layout_opts)
+
             DrawFPS(10, 10)
+            SetMouseCursor(cursor)
         EndDrawing()
     }
 
