@@ -20,12 +20,9 @@ LayoutOpts :: struct {
 
 UNKNOWN_X_COORD :: c.INT32_MIN
 
-// @Note: X-coordinates are always i32s until the function `patch_coordinates` is called
-LayoutXCoord :: f32
-
 LayoutPersonEl :: struct {
     ph: PersonHandle,
-    x:  LayoutXCoord,
+    x:  f32,
 }
 
 LayoutRow :: struct {
@@ -74,7 +71,7 @@ iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandl
 }
 
 @(private="file")
-inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, allocator := context.allocator) {
+inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, allocator: mem.Allocator) {
     assert(col >= 0)
     if person.ph in row.rels do return
     assert(person.ph not_in row.rels)
@@ -99,14 +96,14 @@ add_all_related_of_person :: proc(pm: PersonManager, cur_person_el: LayoutPerson
     next_opts.max_distance -= 1
     any_placed = next_opts.max_distance > 0
     if any_placed {
-        add_descendants_to_layout(pm, cur_person_el, cur_row + 1, layout, next_opts, allocator)
-        add_ancestors_to_layout()
         left, right := add_non_family_related(pm, cur_row, &next_col, layout, next_opts, allocator)
+        add_ancestors_to_layout(pm, cur_person_el, cur_row - 1, layout, next_opts, allocator)
+        add_descendants_to_layout(pm, cur_person_el, cur_row + 1, layout, next_opts, allocator)
     }
     return left, right, next_col, any_placed
 }
 
-add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) -> (left, right: i32) {
+add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int, layout: ^Layout, opts: LayoutOpts, allocator: mem.Allocator) -> (left, right: i32) {
     row := &layout.rows[cur_row]
     assert((rel_to_col^ >= 0) && (rel_to_col^ < len(row.data)))
     rel_to := row.data[rel_to_col^]
@@ -124,7 +121,7 @@ add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int
                 next_birth := person_get(pm, next_person).birth
                 place_left := date_is_before_simple(next_birth, birth)
                 col: int
-                next_x: LayoutXCoord
+                next_x: f32
                 if place_left {
                     next_x = rel_to.x
                     col    = rel_to_col^
@@ -134,7 +131,7 @@ add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int
                     col    = rel_to_col^ + 1
                 }
                 next_person_el := LayoutPersonEl{ ph = next_person, x = next_x }
-                inject_person_in_row(next_person_el, row, col)
+                inject_person_in_row(next_person_el, row, col, allocator)
                 if is_of_rels_arr do append(&row.rels[rel_to.ph],   next_person)
                 else              do append(&row.rels[next_person], rel_to.ph)
                 next_left, next_right, next_col, any_placed := add_all_related_of_person(pm, next_person_el, cur_row, col, layout, opts, allocator)
@@ -153,7 +150,7 @@ add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int
     return left, right
 }
 
-add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: u16, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) {
+add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: u16, layout: ^Layout, opts: LayoutOpts, allocator: mem.Allocator) {
     row := &layout.rows[children_row]
     children_count := 0
     children_per_parent := make(map[PersonHandle][dynamic]PersonHandle, allocator=allocator)
@@ -189,19 +186,39 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     mid     := f32(children_count) / 2
     start_x := parent.x - mid
     col     := 0
-    for col < len(row.data) && start_x < row.data[col].x do col += 1
+    for col < len(row.data) && row.data[col].x < start_x do col += 1
 
     for c, i in all_children {
         child := LayoutPersonEl{ ph = c, x = parent.x + f32(i) - mid }
-        inject_person_in_row(child, row, col)
+        inject_person_in_row(child, row, col, allocator)
         l, r, _, any_placed := add_all_related_of_person(pm, child, children_row, col, layout, opts, allocator)
         if any_placed do col += int(r)
         else          do col += 1
     }
 }
 
-add_ancestors_to_layout :: proc() {
+add_ancestors_to_layout :: proc(pm: PersonManager, child: LayoutPersonEl, parents_row: u16, layout: ^Layout, opts: LayoutOpts, allocator: mem.Allocator) {
+    row        := &layout.rows[parents_row]
+    child_rels := person_get_rels(pm, child.ph)
+    parents    := (LayoutFlags.Actual_Parents in opts.flags) ? child_rels.actual_parents : child_rels.official_parents
 
+    parents_to_add_count := 0
+    parent_col := 0
+    for parent_col < len(row.data) && row.data[parent_col].x < child.x do parent_col += 1
+    for parent in parents {
+        if parent != {} && parent not_in row.rels do parents_to_add_count += 1
+    }
+    parent_x := parents_to_add_count == 2 ? child.x - 0.5 : child.x
+    for parent in parents {
+        if parent != {} && parent not_in row.rels {
+            parent_el := LayoutPersonEl{ ph = parent, x = parent_x }
+            inject_person_in_row(parent_el, row, parent_col, allocator)
+            l, r, _, any_placed := add_all_related_of_person(pm, parent_el, parents_row, parent_col, layout, opts, allocator)
+            if any_placed do parent_col += int(r)
+            else          do parent_col += 1
+            parent_x += 1
+        }
+    }
 }
 
 layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutOpts, allocator := context.allocator) -> (layout: Layout, err: runtime.Allocator_Error) #optional_allocator_error {
@@ -210,12 +227,12 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
     for _, i in layout.rows {
         layout.rows[i] = {
             data = make([dynamic]LayoutPersonEl, allocator=allocator),
-            rels = make(map[PersonHandle][dynamic]PersonHandle,   allocator=allocator),
+            rels = make(map[PersonHandle][dynamic]PersonHandle, allocator=allocator),
         }
     }
     start_col := 0
     start_el  := LayoutPersonEl{ ph = start_person, x = 0 }
-    inject_person_in_row(start_el, &layout.rows[center_row], start_col)
+    inject_person_in_row(start_el, &layout.rows[center_row], start_col, allocator)
 
     // @Todo: Layout edges somehow
     add_all_related_of_person(pm, start_el, center_row, start_col, &layout, opts, allocator)
