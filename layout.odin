@@ -93,7 +93,20 @@ inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, 
     row.rels[person.ph] = make([dynamic]PersonHandle, allocator=allocator)
 }
 
-add_related_to_layout :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) -> (left, right: i32) {
+add_all_related_of_person :: proc(pm: PersonManager, cur_person_el: LayoutPersonEl, cur_row: u16, cur_col: int, layout: ^Layout, opts: LayoutOpts, allocator: mem.Allocator) -> (left, right: i32, next_col: int, any_placed: bool) {
+    next_col   = cur_col
+    next_opts := opts
+    next_opts.max_distance -= 1
+    any_placed = next_opts.max_distance > 0
+    if any_placed {
+        add_descendants_to_layout(pm, cur_person_el, cur_row + 1, layout, next_opts, allocator)
+        add_ancestors_to_layout()
+        left, right := add_non_family_related(pm, cur_row, &next_col, layout, next_opts, allocator)
+    }
+    return left, right, next_col, any_placed
+}
+
+add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int, layout: ^Layout, opts: LayoutOpts, allocator := context.allocator) -> (left, right: i32) {
     row := &layout.rows[cur_row]
     assert((rel_to_col^ >= 0) && (rel_to_col^ < len(row.data)))
     rel_to := row.data[rel_to_col^]
@@ -110,26 +123,22 @@ add_related_to_layout :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int,
             if next_person != {} && (!rel.is_over || rel_type in opts.show_if_rel_over) {
                 next_birth := person_get(pm, next_person).birth
                 place_left := date_is_before_simple(next_birth, birth)
-                next_col: int
+                col: int
                 next_x: LayoutXCoord
                 if place_left {
-                    next_x   = rel_to.x
-                    next_col = rel_to_col^
+                    next_x = rel_to.x
+                    col    = rel_to_col^
                     rel_to_col^ += 1
                 } else {
-                    next_x   = rel_to.x   + 1
-                    next_col = rel_to_col^ + 1
+                    next_x = rel_to.x   + 1
+                    col    = rel_to_col^ + 1
                 }
                 next_person_el := LayoutPersonEl{ ph = next_person, x = next_x }
-                inject_person_in_row(next_person_el, row, next_col)
+                inject_person_in_row(next_person_el, row, col)
                 if is_of_rels_arr do append(&row.rels[rel_to.ph],   next_person)
                 else              do append(&row.rels[next_person], rel_to.ph)
-                next_opts := opts
-                next_opts.max_distance -= 1
-                if next_opts.max_distance > 0 {
-                    add_descendants_to_layout(pm, next_person_el, cur_row + 1, layout, next_opts, allocator)
-                    add_ancestors_to_layout()
-                    next_left, next_right := add_related_to_layout(pm, cur_row, &next_col, layout, next_opts, allocator)
+                next_left, next_right, next_col, any_placed := add_all_related_of_person(pm, next_person_el, cur_row, col, layout, opts, allocator)
+                if any_placed {
                     if place_left {
                         rel_to_col^ = next_col + 1
                         left += next_left + next_right
@@ -182,21 +191,12 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     col     := 0
     for col < len(row.data) && start_x < row.data[col].x do col += 1
 
-    next_opts := opts
-    next_opts.max_distance -= 1
-
     for c, i in all_children {
         child := LayoutPersonEl{ ph = c, x = parent.x + f32(i) - mid }
         inject_person_in_row(child, row, col)
-        if next_opts.max_distance > 0 {
-            add_descendants_to_layout(pm, child, children_row + 1, layout, next_opts, allocator)
-            add_ancestors_to_layout()
-            child_col := index_of(row.data[:], child)
-            l, r := add_related_to_layout(pm, children_row, &child_col, layout, next_opts, allocator)
-            col += int(r)
-        } else {
-            col += 1
-        }
+        l, r, _, any_placed := add_all_related_of_person(pm, child, children_row, col, layout, opts, allocator)
+        if any_placed do col += int(r)
+        else          do col += 1
     }
 }
 
@@ -218,10 +218,7 @@ layout_tree :: proc(pm: PersonManager, start_person: PersonHandle, opts: LayoutO
     inject_person_in_row(start_el, &layout.rows[center_row], start_col)
 
     // @Todo: Layout edges somehow
-    add_ancestors_to_layout()
-    add_descendants_to_layout(pm, start_el, center_row + 1, &layout, opts, allocator)
-    add_related_to_layout(pm, center_row, &start_col, &layout, opts, allocator)
-
+    add_all_related_of_person(pm, start_el, center_row, start_col, &layout, opts, allocator)
     return layout, err
 }
 
