@@ -70,6 +70,7 @@ Rel :: struct {
     start, end: Date, // @Note: Only change start through `rel_set_start`
 }
 
+// @TODO: Store births in a seperate array, because they are often accessed in layouting without requiring the rest of the person-data
 Person :: struct {
     name: string,
     sex:  Sex,

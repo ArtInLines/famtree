@@ -129,7 +129,7 @@ main :: proc() {
     rel_add(pm, { from = Raymun, to = Clarice, type = RelType.Married, end = { year = 276 } })
     rel_add(pm, { from = Raymun, to = Bethany, type = RelType.Married, end = { year = 263 } })
     rel_add(pm, { from = Raymun, to = Lanna,   type = RelType.Married })
-    rel_add(pm, { from = Aleyne, to = Falia,   type = RelType.Affair })
+    rel_add(pm, { from = Aleyne, to = Falia,   type = RelType.Affair  })
     rel_add(pm, { from = Aleyne, to = Harlen,  type = RelType.Married })
     rel_add(pm, { from = Erren,  to = Desmera, type = RelType.Married })
     child_add(pm, Bethanys1,   Raymun, Bethany)
