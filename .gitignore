@@ -1,6 +1,10 @@
+# Executable / Object Files
 *.exe
 *.a
 *.o
+*.obj
+
+# Debug Files
 *.pdb
 *.raddbg
-*.obj
+*.rdbg
