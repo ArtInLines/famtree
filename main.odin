@@ -23,10 +23,10 @@ DisplayOpts :: struct {
 }
 
 draw_layout_get_person_x_coord :: #force_inline proc(el: LayoutPersonEl, layout: Layout, width, margin, offset_x: f32) -> f32 {
-    return (el.x - f32(layout.coord_offset.x))*(width + margin) + offset_x
+    return (el.x + f32(layout.coord_offset.x))*(width + margin) + offset_x
 }
 
-draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, opts: DisplayOpts) -> (selected_person: PersonHandle) {
+draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, opts: DisplayOpts) -> (selected_person: PersonHandle, selected_coords: [2]f32) {
     using rl
     // @Note: These variables are used to track how many frames a person was pressed, to prevent dragging to count as pressing.
     // @TODO: A better method would probably be to only count it as a press, if the mouse didn't move too much
@@ -57,7 +57,11 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
             if CheckCollisionPointRec(GetMousePosition(), { x, y, width, height }) {
                 cursor = MouseCursor.POINTING_HAND
                 if IsMouseButtonDown(.LEFT) do pressed_person = el.ph
-                if IsMouseButtonReleased(.LEFT) && selected_frame_count <= 10 do selected_person = el.ph // @Cleanup: Replace magic number with configurable variable
+                // @Cleanup: Replace magic number with configurable variable
+                if IsMouseButtonReleased(.LEFT) && selected_frame_count <= 10 {
+                    selected_person = el.ph
+                    selected_coords = {el.x, 0}
+                }
             }
         }
 
@@ -93,7 +97,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
     if pressed_person == last_selected_person do selected_frame_count += 1
     else                                      do selected_frame_count = 0
     last_selected_person = pressed_person
-    return selected_person
+    return selected_person, selected_coords
 }
 
 get_default_offset :: proc(screen: [2]f32, zoom: f32, max_layout_distance: f32) -> (offset: [2]f32) {
@@ -171,10 +175,12 @@ main :: proc() {
 
         BeginDrawing()
             ClearBackground(BLACK)
-            selected_person := draw_layout(pm, layout, root_ph, display_opts)
+            selected_person, selected_coords := draw_layout(pm, layout, root_ph, display_opts)
             if selected_person != {} {
                 root_ph = selected_person
+                old_coord_offset := layout.coord_offset
                 layout  = layout_tree(pm, root_ph, layout_opts)
+                layout.coord_offset = selected_coords + old_coord_offset - layout.coord_offset
             }
 
             DrawFPS(10, 10)
