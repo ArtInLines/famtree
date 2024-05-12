@@ -60,7 +60,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
                 // @Cleanup: Replace magic number with configurable variable
                 if IsMouseButtonReleased(.LEFT) && selected_frame_count <= 10 {
                     selected_person = el.ph
-                    selected_coords = {el.x, 0}
+                    selected_coords = {el.x, f32(len(layout.rows)/2 - i)}
                 }
             }
         }
