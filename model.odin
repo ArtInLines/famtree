@@ -2,10 +2,19 @@ package famtree
 
 import "base:runtime"
 import "core:mem"
+import "core:fmt" // @Cleanup
 import "core:c"
 
 // @Note: PersonHandle of 0 represents an invalid handle
-PersonHandle :: distinct u32;
+// @Impl: A PersonHandle is an index into the array of all persons (stored in the PersonManager struct).
+// @Impl: The 0th element stores the head for a freelist and is thus used to represent unknown/missing persons
+PersonHandle  :: distinct u32;
+
+// @Note: ParentsHandle is a unique handle for a person's parents, whether they have 0, 1 or 2 stored parents
+// @Note: A ParentsHandle of 0 represents that the person has no parents
+// @Impl: It stores both PersonHandles of the parents packed as a single number, with the higher number in the upper 4 bytes
+// @Impl: If only one or no parents exist, 0 is used as a PersonHandle for them, thus naturally creating 0 as a Handle for when no parents are stored
+ParentsHandle :: distinct u64;
 
 @(private="file")
 RelInternalID :: distinct u16
@@ -186,6 +195,30 @@ is_actual_parent :: #force_inline proc(pm: PersonManager, child, parent: PersonH
     child_rels := person_get_rels(pm, child)
     idx := index_of(child_rels.official_parents[:], parent)
     return (idx >= 0 && child_rels.actual_parents[idx] == {}) || (idx < 0 && child_rels.actual_parents[idx] != {})
+}
+
+// @TODO: Names "handle_of_parents" and "get_parents_handle" are kinda confusing and could be more clear
+handle_of_parents :: #force_inline proc(parent1, parent2: PersonHandle) -> ParentsHandle {
+    upper, lower: ParentsHandle
+    if parent1 >= parent2 do upper, lower = ParentsHandle(parent1), ParentsHandle(parent2)
+    else                  do upper, lower = ParentsHandle(parent2), ParentsHandle(parent1)
+    res := ParentsHandle((upper << 32) | (lower << 0))
+    // fmt.printf("handle_of_parents(0x%x, 0x%x) => 0x%x\n", parent1, parent2, res)
+    return res
+}
+
+get_parents_handle :: #force_inline proc(pm: PersonManager, child: PersonHandle, actual_parents: bool) -> ParentsHandle {
+    rels := person_get_rels(pm, child)
+    parents := actual_parents ? rels.actual_parents : rels.official_parents
+    return handle_of_parents(parents[0], parents[1])
+}
+
+// @Note: Guarantuees that if there's only one parent, it will be the first element in the output array
+// @Note: To check whether there's only one parent, simply check `parents[1] == {}`
+get_parents_from_handle :: #force_inline proc(parents: ParentsHandle) -> [2]PersonHandle {
+    res: [2]PersonHandle = { PersonHandle((parents >> 32) & 0xff), PersonHandle(parents & 0xff) }
+    // fmt.printf("person_handle(0x%x) => [0x%x, 0x%x]\n", parents, res[0], res[1]);
+    return res;
 }
 
 rel_get_fast :: #force_inline proc(pm: PersonManager, rh: RelHandle, rel_type: RelType) -> Rel {

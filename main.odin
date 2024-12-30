@@ -26,6 +26,10 @@ draw_layout_get_person_x_coord :: #force_inline proc(el: LayoutPersonEl, layout:
     return (el.x + f32(layout.coord_offset.x))*(width + margin) + offset_x
 }
 
+draw_layout_get_y_coord :: #force_inline proc(i: f32, layout: Layout, height, margin, offset_y: f32) -> f32 {
+    return (i - layout.coord_offset.y)*(height + margin) + offset_y
+}
+
 draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, opts: DisplayOpts) -> (selected_person: PersonHandle, selected_coords: [2]f32) {
     using rl
     // @Note: These variables are used to track how many frames a person was pressed, to prevent dragging to count as pressing.
@@ -36,7 +40,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
 
     width   := max(opts.zoom*DEFAULT_PERSON_WIDTH, 1)
     height  := max(opts.zoom*DEFAULT_PERSON_HEIGHT, 1)
-    margin  := opts.zoom*DEFAULT_PERSON_MARGIN
+    margin  := max(opts.zoom*DEFAULT_PERSON_MARGIN, 6)
     padding := opts.zoom*DEFAULT_PERSON_PAD
     rel_thickness := max(opts.zoom*DEFAULT_REL_THICKNESS, 1)
     rel_pad       := opts.zoom*DEFAULT_PERSON_PAD
@@ -46,7 +50,63 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
 
     for row, i in layout.rows {
         clear(&person_to_idx)
-        y := (f32(i) - layout.coord_offset.y)*(height + margin) + opts.offset.y
+        y := draw_layout_get_y_coord(f32(i), layout, height, margin, opts.offset.y)
+
+        //    -----------    -----------
+        //    | ParentA |    | ParentB |
+        //    -----a-----    -----b-----
+        //         |              |
+        //         c------d-------e
+        //                |
+        // t0--------t1---f----t2-------t3
+        // |          |        |         |
+        // p0        p1        p2       p3
+        for parent_handle, children in row.parents {
+            parents := get_parents_from_handle(parent_handle)
+            if (parents[0] == {}) do continue;
+            fmt.println("-----")
+            fmt.println(layout.rows[i].data)
+            for parent_handle, children in layout.rows[i].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
+            fmt.println(layout.rows[i-1].data)
+            for parent_handle, children in layout.rows[i-1].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
+            p0_row_idx := index_of_person(layout.rows[i-1].data[:], parents[0]);
+            if (p0_row_idx < 0) do continue; // @Nocheckin
+            assert(p0_row_idx >= 0);
+            dy := draw_layout_get_y_coord(f32(i) - 0.333, layout, height, margin, opts.offset.y)
+            d: Vector2
+            if parents[1] == {} { // 1 parent - Draw single line from parents[0] to point d
+                cx := width/2 + draw_layout_get_person_x_coord(layout.rows[i-1].data[p0_row_idx], layout, width, margin, opts.offset.x)
+                cy := draw_layout_get_y_coord(f32(i-1), layout, height, margin, opts.offset.y)
+                d   = Vector2{ cx, dy }
+                DrawLineEx(Vector2{ cx, cy }, d, rel_thickness, rel_color)
+            } else { // 2 parents - Draw lines from a, b to c and d
+                p1_row_idx := index_of_person(layout.rows[i-1].data[:], parents[1])
+                assert(p1_row_idx != -1)
+                ax := draw_layout_get_person_x_coord(layout.rows[i-1].data[p0_row_idx], layout, width, margin, opts.offset.x)
+                bx := draw_layout_get_person_x_coord(layout.rows[i-1].data[p1_row_idx], layout, width, margin, opts.offset.x)
+                parent_y := draw_layout_get_y_coord(f32(i-1), layout, height, margin, opts.offset.y)
+                cx := (ax >= bx ? ax - bx : bx - ax)/2
+                cy := draw_layout_get_y_coord(f32(i) - 0.666, layout, height, margin, opts.offset.y)
+                a  := Vector2{ ax, parent_y }
+                b  := Vector2{ bx, parent_y }
+                c  := Vector2{ cx, cy }
+                d   = Vector2{ cx, dy }
+                DrawLineEx(a, Vector2{ ax, cy }, rel_thickness, rel_color)
+                DrawLineEx(Vector2{ ax, cy }, c, rel_thickness, rel_color)
+                DrawLineEx(b, Vector2{ bx, cy }, rel_thickness, rel_color)
+                DrawLineEx(Vector2{ bx, cy }, c, rel_thickness, rel_color)
+                DrawLineEx(c, d, rel_thickness, rel_color)
+            }
+            // Draw lines from d to children
+            for child in children {
+                x := draw_layout_get_person_x_coord(layout_el_of_person(row.data[:], child), layout, width, margin, opts.offset.x)
+                t := Vector2{ x, dy }
+                p := Vector2{ x, y  }
+                DrawLineEx(t, d, rel_thickness, rel_color)
+                DrawLineEx(t, p, rel_thickness, rel_color)
+            }
+        }
+
         for el, j in row.data {
             x := draw_layout_get_person_x_coord(el, layout, width, margin, opts.offset.x)
             DrawRectangleV({ x, y }, { width, height }, GRAY)

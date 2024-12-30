@@ -34,6 +34,7 @@ LayoutPersonEl :: struct {
 }
 
 LayoutRow :: struct {
+    parents: map[ParentsHandle][dynamic]PersonHandle,
     data: [dynamic]LayoutPersonEl,
     rels: map[PersonHandle][dynamic]PersonHandle, // can also be used to quickly check if a person is already in this row
 }
@@ -48,6 +49,11 @@ index_of_person :: proc(arr: []LayoutPersonEl, ph: PersonHandle) -> int {
         if x.ph == ph do return i
     }
     return -1
+}
+
+layout_el_of_person :: proc(arr: []LayoutPersonEl, ph: PersonHandle) -> LayoutPersonEl {
+    i := index_of_person(arr, ph);
+    return LayoutPersonEl{} if (i < 0) else arr[i]
 }
 
 @(private="file") // @Note: updates rels & from
@@ -139,6 +145,24 @@ inject_person_in_row :: proc(person: LayoutPersonEl, row: ^LayoutRow, col: int, 
     row.rels[person.ph] = make([dynamic]PersonHandle, allocator=allocator)
 }
 
+@(private="file")
+inject_person_in_row_at_end_of_alignment :: proc(ph: PersonHandle, rel_to_col: int, align: LayoutPersonAlignment, row: ^LayoutRow, allocator: mem.Allocator) {
+    x: f32
+    col := rel_to_col
+    switch align {
+        case .None: assert(false)
+        case .Right:
+            for col > 0 && row.data[col-1].align == .Right do col -= 1
+            x = row.data[col].x - 1
+        case .Left:
+            for col < len(row.data)-1 && row.data[col+1].align == .Left do col += 1
+            x = row.data[col].x + 1
+            col += 1
+    }
+    person_el := LayoutPersonEl{ ph, x, align }
+    inject_person_in_row(person_el, row, col, allocator)
+}
+
 // @TODO: Add parameter to skip adding ancestors
 add_all_related_of_person :: proc(pm: PersonManager, cur_person_el: LayoutPersonEl, cur_row: u16, cur_col: int, layout: ^Layout, skip_ancestors: bool, opts: LayoutOpts, allocator: mem.Allocator) -> (left, right: i32, next_col: int, any_placed: bool) {
     next_col   = cur_col
@@ -182,8 +206,8 @@ add_non_family_related :: proc(pm: PersonManager, cur_row: u16, rel_to_col: ^int
                 }
                 next_person_el := LayoutPersonEl{ ph = next_person, x = next_x, align = place_left ? .Right : .Left }
                 inject_person_in_row(next_person_el, row, col, allocator)
-                if is_of_rels_arr do append(&row.rels[rel_to.ph],   next_person)
-                else              do append(&row.rels[next_person], rel_to.ph)
+                if is_of_rels_arr do append_if_new(&row.rels[rel_to.ph],   next_person)
+                else              do append_if_new(&row.rels[next_person], rel_to.ph)
                 next_left, next_right, next_col, any_placed := add_all_related_of_person(pm, next_person_el, cur_row, col, layout, false, opts, allocator)
                 if any_placed {
                     if place_left {
@@ -216,10 +240,10 @@ add_child_to_children_parent_map :: proc(cpmap: ^ChildrenParentMap, parent, chil
             already_placed_children = make([dynamic]PersonHandle, allocator),
             not_yet_placed_children = make([dynamic]PersonHandle, allocator),
         }
-        append(is_already_placed ? &cpp.already_placed_children : &cpp.not_yet_placed_children, child)
+        append_if_new(is_already_placed ? &cpp.already_placed_children : &cpp.not_yet_placed_children, child)
         append(cpmap, cpp)
     } else {
-        append(is_already_placed ? &cpmap[i].already_placed_children : &cpmap[i].not_yet_placed_children, child)
+        append_if_new(is_already_placed ? &cpmap[i].already_placed_children : &cpmap[i].not_yet_placed_children, child)
     }
 }
 
@@ -257,12 +281,12 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     // Sort parents
     for i in 0..<len(cpmap)-1 {
         min_idx := i
-        min_birth := get_min_date_of_children_per_parent(pm, cpmap[min_idx])
+        max_birth := get_min_date_of_children_per_parent(pm, cpmap[min_idx])
         for j in i+1..<len(cpmap) {
             cur_birth := get_min_date_of_children_per_parent(pm, cpmap[j])
-            if date_is_before(cur_birth, min_birth) {
+            if date_is_before(max_birth, cur_birth) {
                 min_idx   = j
-                min_birth = cur_birth
+                max_birth = cur_birth
             }
         }
         tmp := cpmap[min_idx]
@@ -271,31 +295,28 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     }
 
     children_to_place_in_middle_count := 0
-    for cpp in cpmap {
-        if len(cpp.already_placed_children) == 0 do children_to_place_in_middle_count += len(cpp.not_yet_placed_children)
-    }
-
-
     col := index_of_person(parent_row.data[:], parent.ph)
     parent_els := make([]LayoutPersonEl, len(cpmap), allocator)
-    #reverse for cpp, i in cpmap {
+    for cpp, i in cpmap {
+        if len(cpp.already_placed_children) == 0 do children_to_place_in_middle_count += len(cpp.not_yet_placed_children)
+
         cpp_parent_el := LayoutPersonEl{}
         if cpp.parent not_in parent_row.rels {
             // @TODO: Center parent over children
             place_left := date_is_before(person_get(pm, cpp.parent).birth, person_get(pm, parent.ph).birth)
-            if place_left {
-                cpp_parent_el = { ph = cpp.parent, x = parent.x - 1, align = .Right }
-                inject_person_in_row(cpp_parent_el, parent_row, col, allocator)
-                col += 1
-            } else {
-                cpp_parent_el = { ph = cpp.parent, x = parent.x + 1, align = .Left }
-                inject_person_in_row(cpp_parent_el, parent_row, col + 1, allocator)
-            }
+            inject_person_in_row_at_end_of_alignment(cpp.parent, col, place_left ? .Right : .Left, parent_row, allocator)
+            if place_left do col += 1
         }
         parent_els[i]  = cpp_parent_el
+
+        parents_handle := handle_of_parents(parent.ph, cpp.parent)
+        if (parents_handle != {}) {
+            if parents_handle not_in row.parents do row.parents[parents_handle] = make([dynamic]PersonHandle, allocator)
+            append_if_new(&row.parents[parents_handle], cpp.already_placed_children[:]) // @TODO: I am not sure, but I feel like this might only add duplicates
+            append_if_new(&row.parents[parents_handle], cpp.not_yet_placed_children[:])
+        }
     }
 
-    // @TODO: Center children below their parents instead of centering all children below `parent`
     children_placed_in_middle_count := 0
     col = 0
     for col < len(row.data) && parent.x < row.data[col].x do col += 1
@@ -359,6 +380,12 @@ add_ancestors_to_layout :: proc(pm: PersonManager, child: LayoutPersonEl, parent
     row        := &layout.rows[parents_row]
     child_rels := person_get_rels(pm, child.ph)
     parents    := (LayoutFlags.Actual_Parents in opts.flags) ? child_rels.actual_parents : child_rels.official_parents
+
+    parents_handle := handle_of_parents(parents[0], parents[1])
+    if parents_handle != {} && parents_handle not_in layout.rows[parents_row - 1].parents {
+        layout.rows[parents_row - 1].parents[parents_handle] = make([dynamic]PersonHandle, allocator)
+        append_if_new(&layout.rows[parents_row - 1].parents[parents_handle], child.ph)
+    }
 
     parents_to_add_count := 0
     parent_col := 0

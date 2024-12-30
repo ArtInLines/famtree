@@ -8,6 +8,19 @@ index_of :: proc(arr: $T/[]$E, el: E) -> int {
     return -1
 }
 
+append_elem_if_new :: proc(arr: ^$T/[dynamic]$E, el: E) {
+    if (index_of(arr[:], el) < 0) do append_elem(arr, el)
+}
+
+append_elems_if_new :: proc(arr: ^$T/[dynamic]$E, els: []E) {
+    for el in els do append_elem_if_new(arr, el)
+}
+
+append_if_new :: proc {
+    append_elem_if_new,
+    append_elems_if_new,
+}
+
 ordered_swap :: proc(arr: $T/[]$E, i, j: int) {
     // @Performance: scalar loop is bad, but this is the simplest way of making this work rn
     l := min(i, j)
