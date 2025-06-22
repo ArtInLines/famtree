@@ -62,48 +62,64 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
         // |          |        |         |
         // p0        p1        p2       p3
         for parent_handle, children in row.parents {
+            assert(len(children) >= 1)
             parents := get_parents_from_handle(parent_handle)
             if (parents[0] == {}) do continue;
-            fmt.println("-----")
-            fmt.println(layout.rows[i].data)
-            for parent_handle, children in layout.rows[i].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
-            fmt.println(layout.rows[i-1].data)
-            for parent_handle, children in layout.rows[i-1].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
+            // fmt.println("-----")
+            // fmt.println(layout.rows[i].data)
+            // for parent_handle, children in layout.rows[i].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
+            // fmt.println(layout.rows[i-1].data)
+            // for parent_handle, children in layout.rows[i-1].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
             p0_row_idx := index_of_person(layout.rows[i-1].data[:], parents[0]);
             if (p0_row_idx < 0) do continue; // @Nocheckin
             assert(p0_row_idx >= 0);
             dy := draw_layout_get_y_coord(f32(i) - 0.333, layout, height, margin, opts.offset.y)
-            d: Vector2
+            d, f: Vector2
             if parents[1] == {} { // 1 parent - Draw single line from parents[0] to point d
-                cx := width/2 + draw_layout_get_person_x_coord(layout.rows[i-1].data[p0_row_idx], layout, width, margin, opts.offset.x)
-                cy := draw_layout_get_y_coord(f32(i-1), layout, height, margin, opts.offset.y)
-                d   = Vector2{ cx, dy }
-                DrawLineEx(Vector2{ cx, cy }, d, rel_thickness, rel_color)
+                ax := width/2 + draw_layout_get_person_x_coord(layout.rows[i-1].data[p0_row_idx], layout, width, margin, opts.offset.x) + width/2
+                ay := draw_layout_get_y_coord(f32(i-1), layout, height, margin, opts.offset.y) + height
+                a  := Vector2{ ax, ay }
+                d   = Vector2{ ax, dy }
+                f   = d
+                DrawLineEx(a, d, rel_thickness, rel_color)
             } else { // 2 parents - Draw lines from a, b to c and d
                 p1_row_idx := index_of_person(layout.rows[i-1].data[:], parents[1])
                 assert(p1_row_idx != -1)
-                ax := draw_layout_get_person_x_coord(layout.rows[i-1].data[p0_row_idx], layout, width, margin, opts.offset.x)
-                bx := draw_layout_get_person_x_coord(layout.rows[i-1].data[p1_row_idx], layout, width, margin, opts.offset.x)
-                parent_y := draw_layout_get_y_coord(f32(i-1), layout, height, margin, opts.offset.y)
-                cx := (ax >= bx ? ax - bx : bx - ax)/2
-                cy := draw_layout_get_y_coord(f32(i) - 0.666, layout, height, margin, opts.offset.y)
+                ax := draw_layout_get_person_x_coord(layout.rows[i-1].data[p0_row_idx], layout, width, margin, opts.offset.x) + width/2
+                bx := draw_layout_get_person_x_coord(layout.rows[i-1].data[p1_row_idx], layout, width, margin, opts.offset.x) + width/2
+                parent_y := draw_layout_get_y_coord(f32(i-1), layout, height, margin, opts.offset.y) + height
+                dx := min(ax, bx) + abs(ax - bx)/2
+                fy := draw_layout_get_y_coord(f32(i) - 0.666, layout, height, margin, opts.offset.y) + height
                 a  := Vector2{ ax, parent_y }
                 b  := Vector2{ bx, parent_y }
-                c  := Vector2{ cx, cy }
-                d   = Vector2{ cx, dy }
-                DrawLineEx(a, Vector2{ ax, cy }, rel_thickness, rel_color)
-                DrawLineEx(Vector2{ ax, cy }, c, rel_thickness, rel_color)
-                DrawLineEx(b, Vector2{ bx, cy }, rel_thickness, rel_color)
-                DrawLineEx(Vector2{ bx, cy }, c, rel_thickness, rel_color)
+                c  := Vector2{ ax, dy }
+                d   = Vector2{ dx, dy }
+                e  := Vector2{ bx, dy }
+                f   = Vector2{ dx, fy }
+                DrawLineEx(a, c, rel_thickness, rel_color)
+                DrawLineEx(b, e, rel_thickness, rel_color)
                 DrawLineEx(c, d, rel_thickness, rel_color)
+                DrawLineEx(e, d, rel_thickness, rel_color)
             }
-            // Draw lines from d to children
-            for child in children {
-                x := draw_layout_get_person_x_coord(layout_el_of_person(row.data[:], child), layout, width, margin, opts.offset.x)
-                t := Vector2{ x, dy }
-                p := Vector2{ x, y  }
-                DrawLineEx(t, d, rel_thickness, rel_color)
+
+            if len(children) == 1 {
+                x := draw_layout_get_person_x_coord(layout_el_of_person(row.data[:], children[0]), layout, width, margin, opts.offset.x) + width/2
+                t := Vector2{ x, d.y }
+                p := Vector2{ x, y }
+                DrawLineEx(d, t, rel_thickness, rel_color)
                 DrawLineEx(t, p, rel_thickness, rel_color)
+            } else {
+                if d != f {
+                    DrawLineEx(d, f, rel_thickness, rel_color)
+                }
+                // Draw lines from f to children
+                for child in children {
+                    x := draw_layout_get_person_x_coord(layout_el_of_person(row.data[:], child), layout, width, margin, opts.offset.x) + width/2
+                    t := Vector2{ x, f.y }
+                    p := Vector2{ x, y  }
+                    DrawLineEx(t, f, rel_thickness, rel_color)
+                    DrawLineEx(t, p, rel_thickness, rel_color)
+                }
             }
         }
 
@@ -207,7 +223,7 @@ main :: proc() {
     root_ph := Raymun
     layout_opts := LayoutOpts{ max_distance = 5, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
     layout := layout_tree(pm, root_ph, layout_opts)
-    fmt.println(layout)
+    // fmt.println(layout)
 
     display_opts := DisplayOpts {
         screen = { f32(win_width), f32(win_height) },
