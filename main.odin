@@ -64,7 +64,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
         for parent_handle, children in row.parents {
             assert(len(children) >= 1)
             parents := get_parents_from_handle(parent_handle)
-            if (parents[0] == {}) do continue;
+            if (parents[0] == {} || i == 0) do continue;
             // fmt.println("-----")
             // fmt.println(layout.rows[i].data)
             // for parent_handle, children in layout.rows[i].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)
@@ -195,35 +195,36 @@ main :: proc() {
     pm          := person_manager_init()
     Raymun      := person_add(&pm, Person{ name = "Raymun",  birth = { year = 216 }})
     Clarice     := person_add(&pm, Person{ name = "Clarice", birth = { year = 250 }})
-    Bethany     := person_add(&pm, Person{ name = "Bethany", birth = { year = 219 }})
-    Lanna       := person_add(&pm, Person{ name = "Lanna",   birth = { year = 270 }})
+    // Bethany     := person_add(&pm, Person{ name = "Bethany", birth = { year = 219 }})
+    // Lanna       := person_add(&pm, Person{ name = "Lanna",   birth = { year = 270 }})
     Reynard     := person_add(&pm, Person{ name = "Reynard", birth = { year = 272 }})
-    Falia       := person_add(&pm, Person{ name = "Falia",   birth = { year = 275 }})
-    Aleyne      := person_add(&pm, Person{ name = "Aleyne",  birth = { year = 274 }})
-    Harlen      := person_add(&pm, Person{ name = "Harlen",  birth = { year = 270 }})
-    Desmera     := person_add(&pm, Person{ name = "Desmera", birth = { year = 278 }})
-    Erren       := person_add(&pm, Person{ name = "Erren",   birth = { year = 276 }})
-    SonOfAleyne := person_add(&pm, Person{ name = "SonOfAleyne", birth = { year = 291 }, death = { year = 292 }})
-    Bethanys1   := person_add(&pm, Person{ name = "Bethanys1",   birth = { year = 242 }, death = { year = 243 }})
-    Bethanys2   := person_add(&pm, Person{ name = "Bethanys2",   birth = { year = 248 }, death = { year = 249 }})
+    // Falia       := person_add(&pm, Person{ name = "Falia",   birth = { year = 275 }})
+    // Aleyne      := person_add(&pm, Person{ name = "Aleyne",  birth = { year = 274 }})
+    // Harlen      := person_add(&pm, Person{ name = "Harlen",  birth = { year = 270 }})
+    // Desmera     := person_add(&pm, Person{ name = "Desmera", birth = { year = 278 }})
+    // Erren       := person_add(&pm, Person{ name = "Erren",   birth = { year = 276 }})
+    // SonOfAleyne := person_add(&pm, Person{ name = "SonOfAleyne", birth = { year = 291 }, death = { year = 292 }})
+    // Bethanys1   := person_add(&pm, Person{ name = "Bethanys1",   birth = { year = 242 }, death = { year = 243 }})
+    // Bethanys2   := person_add(&pm, Person{ name = "Bethanys2",   birth = { year = 248 }, death = { year = 249 }})
     rel_add(pm, { from = Raymun, to = Clarice, type = RelType.Married, end = { year = 276 } })
-    rel_add(pm, { from = Raymun, to = Bethany, type = RelType.Married, end = { year = 263 } })
-    rel_add(pm, { from = Raymun, to = Lanna,   type = RelType.Married })
-    rel_add(pm, { from = Aleyne, to = Falia,   type = RelType.Affair  })
-    rel_add(pm, { from = Aleyne, to = Harlen,  type = RelType.Married })
-    rel_add(pm, { from = Erren,  to = Desmera, type = RelType.Married })
-    child_add(pm, Bethanys1,   Raymun, Bethany)
-    child_add(pm, Bethanys2,   Raymun, Bethany)
+    // rel_add(pm, { from = Raymun, to = Bethany, type = RelType.Married, end = { year = 263 } })
+    // rel_add(pm, { from = Raymun, to = Lanna,   type = RelType.Married })
+    // rel_add(pm, { from = Aleyne, to = Falia,   type = RelType.Affair  })
+    // rel_add(pm, { from = Aleyne, to = Harlen,  type = RelType.Married })
+    // rel_add(pm, { from = Erren,  to = Desmera, type = RelType.Married })
+    // child_add(pm, Bethanys1,   Raymun, Bethany)
+    // child_add(pm, Bethanys2,   Raymun, Bethany)
     child_add(pm, Reynard,     Raymun, Clarice)
-    child_add(pm, Aleyne,      Raymun, Clarice)
-    child_add(pm, Erren,       Raymun, Clarice)
-    child_add(pm, SonOfAleyne, Aleyne, Harlen)
+    // child_add(pm, Aleyne,      Raymun, Clarice)
+    // child_add(pm, Erren,       Raymun, Clarice)
+    // child_add(pm, SonOfAleyne, Aleyne, Harlen)
 
 
     root_ph := Raymun
-    layout_opts := LayoutOpts{ max_distance = 5, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
+    layout_opts := LayoutOpts{ max_distance = 2, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
     layout := layout_tree(pm, root_ph, layout_opts)
-    // fmt.println(layout)
+
+    fmt.println(layout)
 
     display_opts := DisplayOpts {
         screen = { f32(win_width), f32(win_height) },

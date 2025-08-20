@@ -44,6 +44,16 @@ Layout :: struct {
     coord_offset: [2]f32,
 }
 
+print_layout_without_rels :: proc(l: Layout, pm: PersonManager) {
+    for row in l.rows {
+        for person in row.data {
+            fmt.printf("%v (%v, %v)   ", person_get(pm, person.ph).name, person.x, person.align)
+        }
+        if len(row.data) > 0 do fmt.print("\n")
+    }
+    // fmt.println("-------------------------")
+}
+
 index_of_person :: proc(arr: []LayoutPersonEl, ph: PersonHandle) -> int {
     for x, i in arr {
         if x.ph == ph do return i
@@ -163,7 +173,6 @@ inject_person_in_row_at_end_of_alignment :: proc(ph: PersonHandle, rel_to_col: i
     inject_person_in_row(person_el, row, col, allocator)
 }
 
-// @TODO: Add parameter to skip adding ancestors
 add_all_related_of_person :: proc(pm: PersonManager, cur_person_el: LayoutPersonEl, cur_row: u16, cur_col: int, layout: ^Layout, skip_ancestors: bool, opts: LayoutOpts, allocator: mem.Allocator) -> (left, right: i32, next_col: int, any_placed: bool) {
     next_col   = cur_col
     next_opts := opts
@@ -171,7 +180,9 @@ add_all_related_of_person :: proc(pm: PersonManager, cur_person_el: LayoutPerson
     any_placed = next_opts.max_distance > 0
     if any_placed {
         add_descendants_to_layout(pm, cur_person_el, cur_row + 1, layout, next_opts, allocator)
-        if !skip_ancestors do add_ancestors_to_layout(pm, cur_person_el, cur_row - 1, layout, next_opts, allocator)
+        if !skip_ancestors {
+            add_ancestors_to_layout(pm, cur_person_el, cur_row - 1, layout, next_opts, allocator)
+        }
         left, right := add_non_family_related(pm, cur_row, &next_col, layout, next_opts, allocator)
     }
     return left, right, next_col, any_placed
@@ -258,8 +269,19 @@ get_min_date_of_children_per_parent :: proc(pm: PersonManager, cpp: ChildrenPerP
     else do return get_min_date(person_get(pm, cpp.already_placed_children[0]).birth, person_get(pm, cpp.not_yet_placed_children[0]).birth)
 }
 
+get_other_parent :: proc(pm: PersonManager, child: PersonHandle, parent: PersonHandle, flags: bit_set[LayoutFlags]) -> PersonHandle {
+    if LayoutFlags.Actual_Parents in flags {
+        if is_actual_parent(pm, child, parent) {
+            return get_other_of_tuple(person_get_rels(pm, child).actual_parents, parent)
+        }
+    } else if is_official_parent(pm, child, parent) {
+        return get_other_of_tuple(person_get_rels(pm, child).official_parents, parent)
+    }
+    return {};
+}
+
 add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, children_row: u16, layout: ^Layout, opts: LayoutOpts, allocator: mem.Allocator) {
-    // Map all children to the corresponding the parents, filtering out any children, that shouldn't be drawn
+    // Map all children to the corresponding parents, filtering out any children, that shouldn't be drawn
     row := &layout.rows[children_row]
     parent_row := &layout.rows[children_row-1]
     children_count := 0
@@ -267,14 +289,9 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     for child in person_get_rels(pm, parent.ph).children {
         if !(LayoutFlags.Dead_Persons in opts.flags || person_get(pm, child).death == {}) do continue
         is_already_placed := child in row.rels
-        if LayoutFlags.Actual_Parents in opts.flags {
-            if is_actual_parent(pm, child, parent.ph) {
-                other_parent := get_other_of_tuple(person_get_rels(pm, child).actual_parents, parent.ph)
-                add_child_to_children_parent_map(&cpmap, other_parent, child, is_already_placed, allocator)
-            }
-        } else if is_official_parent(pm, child, parent.ph) {
-                other_parent := get_other_of_tuple(person_get_rels(pm, child).official_parents, parent.ph)
-                add_child_to_children_parent_map(&cpmap, other_parent, child, is_already_placed, allocator)
+        other_parent := get_other_parent(pm, child, parent.ph, opts.flags)
+        if other_parent != {} {
+            add_child_to_children_parent_map(&cpmap, other_parent, child, is_already_placed, allocator)
         }
     }
 
@@ -324,7 +341,18 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
         // @TODO: Maybe add functionality for moving LayoutPersonEls after they've already been placed, to allow recentering parents over children for example
         if len(cpp.already_placed_children) == 0 {
             for c in cpp.not_yet_placed_children {
-                child := LayoutPersonEl{ ph = c, x = children_placed_in_middle_count > children_to_place_in_middle_count/2 ? parent.x : parent.x + 1, align = .None }
+                // child := LayoutPersonEl{ ph = c, x = children_placed_in_middle_count > children_to_place_in_middle_count/2 ? parent.x + 1 : parent.x, align = .None }
+                other_parent_ph := get_other_parent(pm, c, parent.ph, opts.flags)
+                other_parent: LayoutPersonEl = {}
+                if other_parent_ph != {} {
+                    for el in layout.rows[children_row - 1].data {
+                        if other_parent_ph == el.ph {
+                            other_parent = el
+                            break
+                        }
+                    }
+                }
+                child := LayoutPersonEl{ ph = c, x = other_parent != {} ? f32(parent.x + other_parent.x) / 2 : parent.x, align = .None }
                 inject_person_in_row(child, row, col, allocator)
                 l, r, _, any_placed := add_all_related_of_person(pm, child, children_row, col, layout, true, opts, allocator)
                 if any_placed do col += int(r) + 1
@@ -371,7 +399,9 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     }
 
     for parent_el in parent_els {
-        if parent_el.ph != {} do add_all_related_of_person(pm, parent_el, children_row - 1, index_of_person(parent_row.data[:], parent_el.ph), layout, false, opts, allocator)
+        if parent_el.ph != {} {
+            add_all_related_of_person(pm, parent_el, children_row - 1, index_of_person(parent_row.data[:], parent_el.ph), layout, false, opts, allocator)
+        }
     }
     delete(parent_els)
 }
