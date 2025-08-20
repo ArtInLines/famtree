@@ -95,29 +95,31 @@ iter_rels_from_merged :: proc(pm: PersonManager, rels: ^[]Rel, from: ^[]RelHandl
 }
 
 @(private="file")
+move_persons_left :: #force_inline proc(row: ^LayoutRow, col: int) {
+    i := col - 1
+    for 0 <= i && row.data[i].x > row.data[i+1].x - 1 {
+        row.data[i].x = row.data[i+1].x - 1
+        i -= 1
+    }
+}
+
+@(private="file")
+move_persons_right :: #force_inline proc(row: ^LayoutRow, col: int) {
+    i := col + 1
+    for i < len(row.data) && row.data[i-1].x > row.data[i].x - 1 {
+        row.data[i].x = row.data[i-1].x + 1
+        i += 1
+    }
+}
+
+@(private="file")
 move_persons :: #force_inline proc(row: ^LayoutRow, col: int, move_left_first: bool) {
     if move_left_first {
-        i := col - 1
-        for 0 <= i && row.data[i].x > row.data[i+1].x - 1 {
-            row.data[i].x = row.data[i+1].x - 1
-            i -= 1
-        }
-        i  = col + 1
-        for i < len(row.data) && row.data[i-1].x > row.data[i].x - 1 {
-            row.data[i].x = row.data[i-1].x + 1
-            i += 1
-        }
+        move_persons_left(row, col)
+        move_persons_right(row, col)
     } else {
-        i := col + 1
-        for i < len(row.data) && row.data[i-1].x > row.data[i].x - 1 {
-            row.data[i].x = row.data[i-1].x + 1
-            i += 1
-        }
-        i  = col - 1
-        for 0 <= i && row.data[i].x > row.data[i+1].x - 1 {
-            row.data[i].x = row.data[i+1].x - 1
-            i -= 1
-        }
+        move_persons_right(row, col)
+        move_persons_left(row, col)
     }
 }
 
@@ -340,8 +342,7 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     for cpp in cpmap {
         // @TODO: Maybe add functionality for moving LayoutPersonEls after they've already been placed, to allow recentering parents over children for example
         if len(cpp.already_placed_children) == 0 {
-            for c in cpp.not_yet_placed_children {
-                // child := LayoutPersonEl{ ph = c, x = children_placed_in_middle_count > children_to_place_in_middle_count/2 ? parent.x + 1 : parent.x, align = .None }
+            for c, i in cpp.not_yet_placed_children {
                 other_parent_ph := get_other_parent(pm, c, parent.ph, opts.flags)
                 other_parent: LayoutPersonEl = {}
                 if other_parent_ph != {} {
@@ -352,7 +353,9 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
                         }
                     }
                 }
-                child := LayoutPersonEl{ ph = c, x = other_parent != {} ? f32(parent.x + other_parent.x) / 2 : parent.x, align = .None }
+                middle_of_parents := other_parent != {} ? f32(parent.x + other_parent.x) / 2 : parent.x
+                first_child_x := middle_of_parents - f32(len(cpp.not_yet_placed_children) - 1)/2
+                child := LayoutPersonEl{ ph = c, x = first_child_x + f32(i), align = .None }
                 inject_person_in_row(child, row, col, allocator)
                 l, r, _, any_placed := add_all_related_of_person(pm, child, children_row, col, layout, true, opts, allocator)
                 if any_placed do col += int(r) + 1

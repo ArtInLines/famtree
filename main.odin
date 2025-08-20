@@ -199,10 +199,10 @@ main :: proc() {
     // Lanna       := person_add(&pm, Person{ name = "Lanna",   birth = { year = 270 }})
     Reynard     := person_add(&pm, Person{ name = "Reynard", birth = { year = 272 }})
     // Falia       := person_add(&pm, Person{ name = "Falia",   birth = { year = 275 }})
-    // Aleyne      := person_add(&pm, Person{ name = "Aleyne",  birth = { year = 274 }})
+    Aleyne      := person_add(&pm, Person{ name = "Aleyne",  birth = { year = 274 }})
     // Harlen      := person_add(&pm, Person{ name = "Harlen",  birth = { year = 270 }})
     // Desmera     := person_add(&pm, Person{ name = "Desmera", birth = { year = 278 }})
-    // Erren       := person_add(&pm, Person{ name = "Erren",   birth = { year = 276 }})
+    Erren       := person_add(&pm, Person{ name = "Erren",   birth = { year = 276 }})
     // SonOfAleyne := person_add(&pm, Person{ name = "SonOfAleyne", birth = { year = 291 }, death = { year = 292 }})
     // Bethanys1   := person_add(&pm, Person{ name = "Bethanys1",   birth = { year = 242 }, death = { year = 243 }})
     // Bethanys2   := person_add(&pm, Person{ name = "Bethanys2",   birth = { year = 248 }, death = { year = 249 }})
@@ -215,13 +215,13 @@ main :: proc() {
     // child_add(pm, Bethanys1,   Raymun, Bethany)
     // child_add(pm, Bethanys2,   Raymun, Bethany)
     child_add(pm, Reynard,     Raymun, Clarice)
-    // child_add(pm, Aleyne,      Raymun, Clarice)
-    // child_add(pm, Erren,       Raymun, Clarice)
+    child_add(pm, Aleyne,      Raymun, Clarice)
+    child_add(pm, Erren,       Raymun, Clarice)
     // child_add(pm, SonOfAleyne, Aleyne, Harlen)
 
 
     root_ph := Raymun
-    layout_opts := LayoutOpts{ max_distance = 2, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
+    layout_opts := LayoutOpts{ max_distance = 3, rels_to_show = {.Friend, .Married, .Affair}, show_if_rel_over = {.Friend, .Married, .Affair}, flags = { .Dead_Persons } }
     layout := layout_tree(pm, root_ph, layout_opts)
 
     fmt.println(layout)
