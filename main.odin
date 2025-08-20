@@ -64,7 +64,7 @@ draw_layout :: proc(pm: PersonManager, layout: Layout, root_ph: PersonHandle, op
         for parent_handle, children in row.parents {
             assert(len(children) >= 1)
             parents := get_parents_from_handle(parent_handle)
-            if (parents[0] == {} || i == 0) do continue;
+            if (parents[0] == {}) do continue;
             // fmt.println("-----")
             // fmt.println(layout.rows[i].data)
             // for parent_handle, children in layout.rows[i].parents do fmt.printf("[%x, %x] => %v\n", get_parents_from_handle(parent_handle)[0], get_parents_from_handle(parent_handle)[1], children)

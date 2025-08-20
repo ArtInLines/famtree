@@ -413,8 +413,8 @@ add_ancestors_to_layout :: proc(pm: PersonManager, child: LayoutPersonEl, parent
 
     parents_handle := handle_of_parents(parents[0], parents[1])
     if parents_handle != {} && parents_handle not_in layout.rows[parents_row - 1].parents {
-        layout.rows[parents_row - 1].parents[parents_handle] = make([dynamic]PersonHandle, allocator)
-        append_if_new(&layout.rows[parents_row - 1].parents[parents_handle], child.ph)
+        layout.rows[parents_row + 1].parents[parents_handle] = make([dynamic]PersonHandle, allocator)
+        append_if_new(&layout.rows[parents_row + 1].parents[parents_handle], child.ph)
     }
 
     parents_to_add_count := 0
