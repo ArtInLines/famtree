@@ -313,6 +313,7 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
         cpmap[i] = tmp
     }
 
+    // Add missing parents to layout
     children_to_place_in_middle_count := 0
     col := index_of_person(parent_row.data[:], parent.ph)
     parent_els := make([]LayoutPersonEl, len(cpmap), allocator)
@@ -339,7 +340,7 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     children_placed_in_middle_count := 0
     col = 0
     for col < len(row.data) && parent.x < row.data[col].x do col += 1
-    for cpp in cpmap {
+    for &cpp in cpmap {
         // @TODO: Maybe add functionality for moving LayoutPersonEls after they've already been placed, to allow recentering parents over children for example
         if len(cpp.already_placed_children) == 0 {
             for c, i in cpp.not_yet_placed_children {
@@ -363,19 +364,21 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
                 children_placed_in_middle_count += 1
             }
         } else {
-            already_placed_xs     := make([]f32,  len(cpp.already_placed_children), allocator)
-            already_placed_births := make([]Date, len(cpp.already_placed_children), allocator)
+            // already_placed_xs & already_placed_births are parallel to already_placed_children
+            already_placed_xs     := make([dynamic]f32,  len(cpp.already_placed_children), allocator)
+            already_placed_births := make([dynamic]Date, len(cpp.already_placed_children), allocator)
             for c, i in cpp.already_placed_children {
                 already_placed_xs[i]     = row.data[index_of_person(row.data[:], c)].x
                 already_placed_births[i] = person_get(pm, c).birth
             }
+            // Sort already_placed_children by their x-coordinate
             for i in 0..<len(already_placed_xs)-1 {
                 min := i
                 for j in i+1..<len(already_placed_xs) {
                     if already_placed_xs[j] < already_placed_xs[min] do min = j
                 }
-                slice.swap(already_placed_xs, i, min)
-                slice.swap(already_placed_births, i, min)
+                slice.swap(already_placed_xs[:],     i, min)
+                slice.swap(already_placed_births[:], i, min)
                 slice.swap(cpp.already_placed_children[:], i, min)
             }
             for c in cpp.not_yet_placed_children {
@@ -394,6 +397,9 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
                 }
                 child := LayoutPersonEl{ ph = c, x = cx, align = .None }
                 inject_person_in_row(child, row, col, allocator)
+                inject_at(&cpp.already_placed_children, i, c)
+                inject_at(&already_placed_xs,           i, cx)
+                inject_at(&already_placed_births,       i, cur_birth)
                 add_all_related_of_person(pm, child, children_row, col, layout, true, opts, allocator)
             }
             delete(already_placed_births)
@@ -409,24 +415,41 @@ add_descendants_to_layout :: proc(pm: PersonManager, parent: LayoutPersonEl, chi
     delete(parent_els)
 }
 
+get_centered_x_of_person_els :: proc(row_data: []LayoutPersonEl, persons: []PersonHandle) -> f32 {
+    sum: f32 = 0
+    outer: for person in persons {
+        inner: for el in row_data {
+            if person == el.ph {
+                sum += el.x
+                break inner
+            }
+        }
+    }
+    return sum / f32(len(persons))
+}
+
 add_ancestors_to_layout :: proc(pm: PersonManager, child: LayoutPersonEl, parents_row: u16, layout: ^Layout, opts: LayoutOpts, allocator: mem.Allocator) {
     row        := &layout.rows[parents_row]
+    child_row  := &layout.rows[parents_row + 1]
     child_rels := person_get_rels(pm, child.ph)
     parents    := (LayoutFlags.Actual_Parents in opts.flags) ? child_rels.actual_parents : child_rels.official_parents
 
     parents_handle := handle_of_parents(parents[0], parents[1])
     if parents_handle != {} && parents_handle not_in layout.rows[parents_row - 1].parents {
-        layout.rows[parents_row + 1].parents[parents_handle] = make([dynamic]PersonHandle, allocator)
-        append_if_new(&layout.rows[parents_row + 1].parents[parents_handle], child.ph)
+        child_row.parents[parents_handle] = make([dynamic]PersonHandle, allocator)
+        append_if_new(&child_row.parents[parents_handle], child.ph)
     }
 
     parents_to_add_count := 0
     parent_col := 0
     for parent_col < len(row.data) && row.data[parent_col].x < child.x do parent_col += 1
     for parent in parents {
-        if parent != {} && parent not_in row.rels do parents_to_add_count += 1
+        if parent != {} && parent not_in row.rels {
+            parents_to_add_count += 1
+        }
     }
-    parent_x := parents_to_add_count == 2 ? child.x - 0.5 : child.x
+    children_centered_x := get_centered_x_of_person_els(child_row.data[:], child_row.parents[parents_handle][:])
+    parent_x := parents_to_add_count == 2 ? children_centered_x - 0.5 : children_centered_x
     for parent in parents {
         if parent != {} && parent not_in row.rels {
             parent_el := LayoutPersonEl{ ph = parent, x = parent_x, align = .None }
